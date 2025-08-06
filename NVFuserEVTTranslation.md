@@ -400,7 +400,7 @@ typename GemmKernel::EpilogueOutputOp::Arguments epilogue_args{
 };
 ```
 
-**Complete Example:** See [dual_output_epilogue_example.cu](examples/dual_output_epilogue_example.cu) for a full working implementation of this dual-output epilogue pattern.
+**Complete Example:** See [dual_output_epilogue_example.cu](examples/99_dual_output_epilogue/dual_output_epilogue_example.cu) for a full working implementation of this dual-output epilogue pattern.
 
 **EVT Flow:**
 ```mermaid
