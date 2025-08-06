@@ -4,13 +4,28 @@
 
 1. [Introduction](#1-introduction)
 2. [Overview of Translation Strategy](#2-overview-of-translation-strategy)
-3. [Core Translation Patterns](#3-core-translation-patterns)
-4. [Runtime Code Generation Architecture](#4-runtime-code-generation-architecture)
-5. [EVT Node Translation](#5-evt-node-translation)
-6. [Fusion Operation Mapping](#6-fusion-operation-mapping)
-7. [Advanced Patterns](#7-advanced-patterns)
-8. [Implementation Strategy](#8-implementation-strategy)
-9. [Questions and Ambiguities](#9-questions-and-ambiguities)
+   2.1. [Translation Strategy Overview](#21-translation-strategy-overview)
+   2.2. [Core Translation Patterns](#22-core-translation-patterns)
+3. [Example nvFuser Pattern](#3-example-nvfuser-pattern)
+   3.1. [Basic Linear Operations](#31-basic-linear-operations)
+4. [EVT Node Translation](#4-evt-node-translation)
+   4.1. [Operation Mapping Table](#41-operation-mapping-table)
+   4.2. [Custom Operation Translation](#42-custom-operation-translation)
+   4.3. [Multiple Aux Inputs and Outputs Example](#43-multiple-aux-inputs-and-outputs-example)
+5. [Fusion Operation Mapping](#5-fusion-operation-mapping)
+   5.1. [nvFuser to EVT Translation Rules](#51-nvfuser-to-evt-translation-rules)
+   5.2. [Memory Layout Translation](#52-memory-layout-translation)
+   5.3. [Data Type Translation](#53-data-type-translation)
+6. [Advanced Patterns](#6-advanced-patterns)
+   6.1. [Multi-Stage Epilogues](#61-multi-stage-epilogues)
+   6.2. [Conditional Operations](#62-conditional-operations)
+   6.3. [Reduction Patterns](#63-reduction-patterns)
+7. [Implementation Strategy](#7-implementation-strategy)
+   7.1. [Integration with nvFuser](#71-integration-with-nvfuser)
+   7.2. [Runtime Compilation](#72-runtime-compilation)
+   7.3. [Performance Optimization](#73-performance-optimization)
+8. [Questions and Ambiguities](#8-questions-and-ambiguities)
+   8.1. [Architecture and Compatibility](#81-architecture-and-compatibility)
 
 ---
 
@@ -55,7 +70,7 @@ The system will generate C++ code at runtime that:
 
 ---
 
-## 3. Core Translation Patterns
+## 3. Example nvFuser Pattern
 
 ### 3.1 Basic Linear Operations
 
@@ -69,7 +84,7 @@ fusion->addInput(A);
 fusion->addInput(B);
 fusion->addInput(C);
 TensorView* acc = fusedMultiplySum(A, B, {-1});
-TensorView* alpha_acc = mul(alpha, acc);
+TensorView* alpha_acc = mul(alpha, ElementScalar);
 TensorView* beta_C = mul(beta, C);
 // output = alpha * acc + beta * C;
 TensorView* output = add(alpha_acc, beta_C);
@@ -77,160 +92,11 @@ TensorView* output_bf16 = castOp(DataType::BFloat16, output);
 fusion->addOutput(output_bf16);
 ```
 
-**Generated C++ Code:**
-```cpp
-// Generated EVT code
-using EVTOp = cutlass::epilogue::fusion::LinComb<
-    ElementD, ElementCompute, ElementC, ElementScalar>;
-
-using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
-    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
-    TileShape, ClusterShape,
-    cutlass::epilogue::collective::EpilogueTileAuto,
-    ElementAccumulator, ElementCompute,
-    ElementC, LayoutC, AlignmentC,
-    ElementD, LayoutD, AlignmentD,
-    cutlass::epilogue::TmaWarpSpecialized,
-    EVTOp
->::CollectiveOp;
-```
-
-### 3.2 Bias Addition
-
-**nvFuser Pattern:**
-```cpp
-// nvFuser bias addition
-auto output = acc + bias;
-```
-
-**Generated C++ Code:**
-```cpp
-// Generated EVT code
-using EVTOp = cutlass::epilogue::fusion::LinCombPerRowBias<
-    ElementD, ElementCompute, ElementBias, ElementC, ElementScalar>;
-
-// Arguments structure
-typename EVTOp::Arguments epilogue_args{
-    .alpha = alpha,
-    .beta = beta,
-    .bias = bias_ptr,
-    .bias_stride = bias_stride
-};
-```
-
-### 3.3 Activation Functions
-
-**nvFuser Pattern:**
-```cpp
-// nvFuser activation
-auto output = relu(acc + bias);
-```
-
-**Generated C++ Code:**
-```cpp
-// Generated EVT code
-using EVTOp = cutlass::epilogue::fusion::LinCombPerRowBiasEltAct<
-    cutlass::epilogue::thread::ReLU,
-    ElementD, ElementCompute, ElementBias, ElementC, ElementScalar>;
-```
-
-### 3.4 Complex Patterns
-
-**nvFuser Pattern:**
-```cpp
-// nvFuser complex pattern
-auto intermediate = acc + bias;
-auto output = gelu(intermediate);
-auto aux_output = intermediate; // Store intermediate for backward pass
-```
-
-**Generated C++ Code:**
-```cpp
-// Generated EVT code
-using EVTOp = cutlass::epilogue::fusion::LinCombPerRowBiasEltActAux<
-    LayoutAux,
-    cutlass::epilogue::thread::GELU,
-    ElementD, ElementCompute, ElementAux, ElementBias, ElementC, ElementScalar>;
-```
-
 ---
 
-## 4. Runtime Code Generation Architecture
+## 4. EVT Node Translation
 
-### 4.1 Code Generation Pipeline
-
-```cpp
-// Runtime code generation structure
-class EVTCodeGenerator {
-private:
-    std::stringstream header_code_;
-    std::stringstream implementation_code_;
-    std::stringstream kernel_code_;
-    
-public:
-    void generate_evt_definition(const nvFuser::Fusion& fusion);
-    void generate_kernel_construction(const nvFuser::Fusion& fusion);
-    std::string get_complete_source_code();
-};
-```
-
-### 4.2 Template-Based Generation
-
-The system will use C++ templates to generate specialized code:
-
-```cpp
-// Generated template specialization
-template<typename ElementD, typename ElementCompute>
-class GeneratedEVT {
-    using EVTOp = cutlass::epilogue::fusion::LinCombPerRowBiasEltAct<
-        cutlass::epilogue::thread::ReLU,
-        ElementD, ElementCompute, ElementBias, ElementC, ElementScalar>;
-        
-    static auto create_epilogue() {
-        return typename cutlass::epilogue::collective::CollectiveBuilder<
-            cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
-            TileShape, ClusterShape,
-            cutlass::epilogue::collective::EpilogueTileAuto,
-            ElementAccumulator, ElementCompute,
-            ElementC, LayoutC, AlignmentC,
-            ElementD, LayoutD, AlignmentD,
-            cutlass::epilogue::TmaWarpSpecialized,
-            EVTOp
-        >::CollectiveOp{};
-    }
-};
-```
-
-### 4.3 Dynamic Type Generation
-
-For complex patterns, the system will generate custom EVT node types:
-
-```cpp
-// Generated custom EVT node
-template<typename ElementCompute>
-struct CustomGELUNode {
-    using ElementOutput = ElementCompute;
-    using ElementCompute = ElementCompute;
-    
-    template<typename ElementAccumulator, int FragmentSize>
-    CUTLASS_DEVICE Array<ElementCompute, FragmentSize>
-    visit(Array<ElementAccumulator, FragmentSize> const& frg_acc, 
-          int epi_v, int epi_m, int epi_n) {
-        Array<ElementCompute, FragmentSize> result;
-        // Custom GELU implementation
-        for (int i = 0; i < FragmentSize; ++i) {
-            result[i] = gelu_activation(frg_acc[i]);
-        }
-        return result;
-    }
-};
-```
-
----
-
-## 5. EVT Node Translation
-
-### 5.1 Operation Mapping Table
+### 4.1 Operation Mapping Table
 
 | nvFuser Operation | Cutlass EVT Pattern | Generated Code Type |
 |-------------------|---------------------|-------------------|
@@ -242,19 +108,24 @@ struct CustomGELUNode {
 | `Reduction` | `Sm90ScalarReduction` | Built-in |
 | `CustomOp` | Custom EVT Node | Generated |
 
-### 5.2 Custom Operation Translation
+### 4.2 Custom Operation Translation
 
 For operations not available in Cutlass, the system generates custom EVT nodes:
 
 ```cpp
-// Generated custom operation
+// Better approach using Cutlass EVT framework for: output = alpha * acc + beta * C
+// This leverages Sm90AuxLoad for automatic fragment loading
+
+// 1. Define the auxiliary load operation
+using AuxLoadC = cutlass::epilogue::fusion::Sm90AuxLoad<
+    Stages, EpilogueTile, ElementCompute, StrideMNL, SmemLayoutAtom, CopyOpS2R>;
+
+// 2. Define the computation operation
 template<typename ElementCompute>
-struct CustomOperationNode {
-    // Parameters for the custom operation
+struct LinearCombinationCompute {
     struct Arguments {
-        ElementCompute param1;
-        ElementCompute param2;
-        // ... other parameters
+        ElementCompute alpha;
+        ElementCompute beta;
     };
     
     Arguments args_;
@@ -262,37 +133,171 @@ struct CustomOperationNode {
     template<typename ElementAccumulator, int FragmentSize>
     CUTLASS_DEVICE Array<ElementCompute, FragmentSize>
     visit(Array<ElementAccumulator, FragmentSize> const& frg_acc, 
+          Array<ElementCompute, FragmentSize> const& frg_C,  // Automatically loaded by Sm90AuxLoad
           int epi_v, int epi_m, int epi_n) {
         Array<ElementCompute, FragmentSize> result;
+        
+        // Perform: result = alpha * acc + beta * C
+        // C fragment is automatically loaded by the EVT framework
         for (int i = 0; i < FragmentSize; ++i) {
-            result[i] = custom_operation(frg_acc[i], args_.param1, args_.param2);
+            result[i] = args_.alpha * frg_acc[i] + args_.beta * frg_C[i];
         }
         return result;
     }
 };
+
+// 3. Compose the complete EVT
+using EVTOp = cutlass::epilogue::fusion::Sm90EVT<
+    LinearCombinationCompute<ElementCompute>,
+    AuxLoadC
+>;
+
+// 4. Usage in epilogue arguments
+typename EVTOp::Arguments epilogue_args{
+    .alpha = alpha,
+    .beta = beta,
+    .ptr_aux = C_ptr,        // Sm90AuxLoad automatically handles this
+    .dAux = C_stride         // Sm90AuxLoad automatically handles this
+};
 ```
 
-### 5.3 Composite Pattern Translation
+**Fusion Flow:**
+```mermaid
+graph TD
+    A[Matmul Accumulator] --> B[Sm90AuxLoad C]
+    C[C Tensor] --> B
+    D[Alpha Scalar] --> E[LinearCombinationCompute]
+    F[Beta Scalar] --> E
+    B --> E
+    E --> G[Output Fragment]
+    
+    style A fill:#e1f5fe
+    style G fill:#c8e6c9
+    style B fill:#fff3e0
+    style E fill:#fff3e0
+```
+```
 
-For complex patterns involving multiple operations:
+### 4.3 Multiple Aux Inputs and Outputs Example
 
+**nvFuser Pattern:**
 ```cpp
-// Generated composite EVT
-using CompositeEVT = cutlass::epilogue::fusion::Sm90EVT<
-    CustomOperationNode<ElementCompute>,
-    cutlass::epilogue::fusion::Sm90EVT<
-        cutlass::epilogue::fusion::LinCombPerRowBias<
-            ElementCompute, ElementCompute, ElementBias, ElementC, ElementScalar>,
-        cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>
-    >
+// nvFuser fusion operation with two aux inputs and two outputs
+// acc is the matmul result, bias1 and bias2 are auxiliary tensors
+TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::BFloat16);
+TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16);
+fusion->addInput(A);
+fusion->addInput(B);
+fusion->addInput(bias1);
+fusion->addInput(bias2);
+TensorView* acc = fusedMultiplySum(A, B, {-1});
+TensorView* alpha_acc = mul(alpha, acc);
+TensorView* beta_bias1 = mul(beta1, bias1);
+TensorView* gamma_bias2 = mul(gamma, bias2);
+// output1 = alpha * acc + beta1 * bias1
+TensorView* output1 = add(alpha_acc, beta_bias1);
+// output2 = alpha * acc + gamma * bias2
+TensorView* output2 = add(alpha_acc, gamma_bias2);
+TensorView* output1_bf16 = castOp(DataType::BFloat16, output1);
+TensorView* output2_bf16 = castOp(DataType::BFloat16, output2);
+fusion->addOutput(output1_bf16);
+fusion->addOutput(output2_bf16);
+```
+
+**Generated C++ Code:**
+```cpp
+// Example based on Cutlass patterns from:
+// https://github.com/NVIDIA/cutlass/blob/main/test/unit/gemm/device/sm90_gemm_f16_f16_f16_tensor_op_f32_cluster_warpspecialized_cooperative_bias_elementwise.cu#L165
+// https://github.com/NVIDIA/cutlass/blob/main/test/unit/gemm/device/sm90_gemm_f16_f16_f16_tensor_op_f32_cluster_warpspecialized_cooperative_bias_elementwise.cu#L298
+
+// EVT approach with two aux inputs and two outputs
+// 1. Define auxiliary load operations for both bias tensors
+using AuxLoadBias1 = cutlass::epilogue::fusion::Sm90AuxLoad<
+    Stages, EpilogueTile, ElementCompute, StrideMNL, SmemLayoutAtom, CopyOpS2R>;
+using AuxLoadBias2 = cutlass::epilogue::fusion::Sm90AuxLoad<
+    Stages, EpilogueTile, ElementCompute, StrideMNL, SmemLayoutAtom, CopyOpS2R>;
+
+// 2. Define the computation operation with two outputs
+template<typename ElementCompute>
+struct DualOutputLinearCombination {
+    struct Arguments {
+        ElementCompute alpha;
+        ElementCompute beta1;
+        ElementCompute gamma;
+    };
+    
+    Arguments args_;
+    
+    template<typename ElementAccumulator, int FragmentSize>
+    CUTLASS_DEVICE auto
+    visit(Array<ElementAccumulator, FragmentSize> const& frg_acc, 
+          Array<ElementCompute, FragmentSize> const& frg_bias1,  // From AuxLoadBias1
+          Array<ElementCompute, FragmentSize> const& frg_bias2,  // From AuxLoadBias2
+          int epi_v, int epi_m, int epi_n) {
+        
+        // Create output fragments
+        Array<ElementCompute, FragmentSize> result1;
+        Array<ElementCompute, FragmentSize> result2;
+        
+        // Perform computations for both outputs
+        for (int i = 0; i < FragmentSize; ++i) {
+            // output1 = alpha * acc + beta1 * bias1
+            result1[i] = args_.alpha * frg_acc[i] + args_.beta1 * frg_bias1[i];
+            // output2 = alpha * acc + gamma * bias2
+            result2[i] = args_.alpha * frg_acc[i] + args_.gamma * frg_bias2[i];
+        }
+        
+        // Return tuple of both outputs
+        return cute::make_tuple(result1, result2);
+    }
+};
+
+// 3. Compose the complete EVT with multiple aux loads
+using EVTOp = cutlass::epilogue::fusion::Sm90EVT<
+    DualOutputLinearCombination<ElementCompute>,
+    AuxLoadBias1,
+    AuxLoadBias2
 >;
+
+// 4. Usage in epilogue arguments
+typename EVTOp::Arguments epilogue_args{
+    .alpha = alpha,
+    .beta1 = beta1,
+    .gamma = gamma,
+    .ptr_aux = bias1_ptr,     // For AuxLoadBias1
+    .dAux = bias1_stride,
+    .ptr_aux2 = bias2_ptr,    // For AuxLoadBias2  
+    .dAux2 = bias2_stride
+};
+```
+
+**Fusion Flow:**
+```mermaid
+graph TD
+    A[Matmul Accumulator] --> B[DualOutputLinearCombination]
+    C[Alpha Scalar] --> B
+    D[Beta1 Scalar] --> B
+    E[Gamma Scalar] --> B
+    F[Bias1 Tensor] --> G[Sm90AuxLoad Bias1]
+    H[Bias2 Tensor] --> I[Sm90AuxLoad Bias2]
+    G --> B
+    I --> B
+    B --> J[Output1: alpha * acc + beta1 * bias1]
+    B --> K[Output2: alpha * acc + gamma * bias2]
+    
+    style A fill:#e1f5fe
+    style J fill:#c8e6c9
+    style K fill:#c8e6c9
+    style B fill:#fff3e0
+    style G fill:#fff3e0
+    style I fill:#fff3e0
 ```
 
 ---
 
-## 6. Fusion Operation Mapping
+## 5. Fusion Operation Mapping
 
-### 6.1 nvFuser to EVT Translation Rules
+### 5.1 nvFuser to EVT Translation Rules
 
 1. **Linear Operations**: Map to `LinComb` patterns
 2. **Bias Operations**: Map to `LinCombPerRowBias` or `LinCombPerColBias`
@@ -301,7 +306,7 @@ using CompositeEVT = cutlass::epilogue::fusion::Sm90EVT<
 5. **Auxiliary Operations**: Map to `Sm90AuxLoad` or `Sm90AuxStore`
 6. **Custom Operations**: Generate custom EVT nodes
 
-### 6.2 Memory Layout Translation
+### 5.2 Memory Layout Translation
 
 ```cpp
 // Generated memory layout translation
@@ -319,7 +324,7 @@ struct LayoutTranslator {
 };
 ```
 
-### 6.3 Data Type Translation
+### 5.3 Data Type Translation
 
 ```cpp
 // Generated data type translation
@@ -341,9 +346,9 @@ struct DataTypeTranslator {
 
 ---
 
-## 7. Advanced Patterns
+## 6. Advanced Patterns
 
-### 7.1 Multi-Stage Epilogues
+### 6.1 Multi-Stage Epilogues
 
 For complex epilogues with multiple stages:
 
@@ -361,7 +366,7 @@ using MultiStageEVT = cutlass::epilogue::fusion::Sm90EVT<
 >;
 ```
 
-### 7.2 Conditional Operations
+### 6.2 Conditional Operations
 
 For operations with runtime conditions:
 
@@ -384,7 +389,7 @@ struct ConditionalNode {
 };
 ```
 
-### 7.3 Reduction Patterns
+### 6.3 Reduction Patterns
 
 For complex reduction patterns:
 
@@ -406,15 +411,15 @@ using ReductionEVT = cutlass::epilogue::fusion::Sm90EVT<
 
 ---
 
-## 8. Implementation Strategy
+## 7. Implementation Strategy
 
-### 8.1 Integration with nvFuser
+### 7.1 Integration with nvFuser
 
 1. **Analysis Phase**: Add EVT analysis to nvFuser's fusion graph analysis
 2. **Translation Phase**: Implement translation logic in nvFuser's code generation
 3. **Code Generation Phase**: Extend nvFuser's C++ code generation to include EVT patterns
 
-### 8.2 Runtime Compilation
+### 7.2 Runtime Compilation
 
 ```cpp
 // Generated runtime compilation code
@@ -433,7 +438,7 @@ public:
 };
 ```
 
-### 8.3 Performance Optimization
+### 7.3 Performance Optimization
 
 1. **Pattern Recognition**: Identify common patterns for optimized EVT construction
 2. **Memory Optimization**: Optimize memory layouts for EVT operations
@@ -441,9 +446,9 @@ public:
 
 ---
 
-## 9. Questions and Ambiguities
+## 8. Questions and Ambiguities
 
-### 9.1 Architecture and Compatibility
+### 8.1 Architecture and Compatibility
 
 1. **GPU Architecture Support**: What is the minimum GPU architecture required for EVT support? Are there limitations for older architectures (pre-Hopper)?
 
