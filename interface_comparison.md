@@ -34,6 +34,7 @@ This document provides a comprehensive comparison of common features across four
 
 5. [5. Epilogue Fusion](#5-epilogue-fusion)
    - [5.1 Bias and Activation Operations](#51-bias-and-activation-operations)
+   - [5.2 Epilogue Visitor Trees (EVT) in Cutlass](#52-epilogue-visitor-trees-evt-in-cutlass)
 
 6. [6. Questions for Further Investigation](#6-questions-for-further-investigation)
    - [6.1 Interface Coverage Questions](#61-interface-coverage-questions)
@@ -206,7 +207,160 @@ This comparison shows how these four interfaces provide different approaches to 
 | **GELU Activation** | [`biasGeluFwd`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/tests/cpp/test_gpu2.cpp#L1110) | Layout operations | Unknown | [`ScaledGELU_taylor`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/gett.hpp#L647) |
 | **ReLU Activation** | [`ReLU` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ops/composite.cpp#L201) | Layout operations | Unknown | [`Clamp` as ReLU](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/gett.hpp#L647) |
 
+### 5.2 Epilogue Visitor Trees (EVT) in Cutlass
 
+Cutlass provides a sophisticated system for epilogue fusion through **Epilogue Visitor Trees (EVT)**, as described in the [Colfax Research article](https://research.colfax-intl.com/epilogue_visitor_tree/). This system allows developers to compose complex epilogue operations using a visitor pattern approach.
+
+#### **EVT Architecture**
+
+**Visitor Pattern Implementation:**
+- **Epilogue Visitors**: Specialized objects that process output data
+- **Tree Structure**: Composable visitors organized in a tree hierarchy
+- **Leaf Nodes**: Basic operations (add, multiply, load, store)
+- **Tree Visitors**: Non-leaf nodes that delegate to children
+
+**Key Benefits:**
+- **Composability**: Complex epilogues built from simple components
+- **Reusability**: Common patterns can be shared across kernels
+- **Flexibility**: Novel epilogues without extensive kernel changes
+- **Performance**: Fused operations avoid additional GMEM-SMEM transfers
+
+#### **Using Built-in EVTs**
+
+**DefaultEpilogue (Simple Cases):**
+```cpp
+// For basic elementwise operations only
+using CollectiveEpilogue = cutlass::epilogue::collective::DefaultEpilogue<
+    cutlass::gemm::TagToStrideC_t<LayoutC>,
+    cutlass::gemm::TagToStrideC_t<LayoutC>,
+    cutlass::epilogue::thread::LinearCombination<ElementC, 1, ElementAccumulator, ElementAccumulator>>;
+```
+
+**Built-in EVT Operations:**
+```cpp
+// ReLU activation with bias
+using EVTOp = cutlass::epilogue::fusion::LinCombEltAct<
+    cutlass::epilogue::thread::ReLU,
+    ElementD, ElementCompute, ElementC, ElementScalar>;
+
+using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
+    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+    Shape<_128,_128,_64>, Shape<_1,_1,_1>,
+    cutlass::epilogue::collective::EpilogueTileAuto,
+    ElementAccumulator, ElementCompute,
+    ElementC, LayoutC, AlignmentC,
+    ElementD, LayoutD, AlignmentD,
+    EpilogueScheduleType,
+    EVTOp
+>::CollectiveOp;
+```
+
+#### **Custom EVT Construction**
+
+**Tree Visitor Example:**
+```cpp
+// Custom tree visitor for complex epilogue
+struct CustomTreeVisitor {
+    template<typename Callbacks>
+    CUTLASS_DEVICE void visit(Callbacks const& callbacks, 
+                              int epi_v, int epi_m, int epi_n) {
+        // Custom computation logic
+        auto result = callbacks.visit(accumulator, epi_v, epi_m, epi_n);
+        // Additional processing
+    }
+};
+
+// Composing multiple operations
+using CustomEVT = cutlass::epilogue::fusion::Sm90TreeVisitor<
+    cutlass::epilogue::fusion::Sm90AuxLoad<ElementAux, LayoutAux>,
+    cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>,
+    CustomTreeVisitor
+>;
+```
+
+#### **EVT Integration with Builder Pattern**
+
+**Complete Kernel Definition:**
+```cpp
+// Mainloop definition
+using CollectiveMainloop = typename cutlass::gemm::collective::CollectiveBuilder<
+    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+    ElementA, LayoutA, 8,
+    ElementB, LayoutB, 8,
+    ElementAccumulator,
+    TileShape_MNK, ClusterShape_MNK,
+    cutlass::gemm::collective::StageCountAutoCarveout<...>,
+    cutlass::gemm::KernelTmaWarpSpecializedPingpong
+>::CollectiveOp;
+
+// Epilogue with EVT
+using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
+    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+    TileShape_MNK, ClusterShape_MNK,
+    cutlass::epilogue::collective::EpilogueTileAuto,
+    ElementAccumulator, ElementCompute,
+    ElementC, LayoutC, AlignmentC,
+    ElementD, LayoutD, AlignmentD,
+    cutlass::epilogue::TmaWarpSpecialized,
+    CustomEVT
+>::CollectiveOp;
+
+// Complete kernel
+using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
+    Shape<int,int,int,int>,
+    CollectiveMainloop,
+    CollectiveEpilogue
+>;
+```
+
+#### **EVT Callback System**
+
+**Consumer Store Callbacks:**
+```cpp
+// Initialize callbacks from EVT
+auto cst_callbacks = evt.get_consumer_store_callbacks(consumer_store_args);
+
+// Callback execution pattern
+cst_callbacks.begin(); // Column and row broadcasts
+for (int epi_n = 0; epi_n < EPI_N; ++epi_n) {
+    for (int epi_m = 0; epi_m < EPI_M; ++epi_m) {
+        cst_callbacks.begin_loop(epi_m, epi_n);
+        // Load operations and synchronization
+        cst_callbacks.previsit(epi_m, epi_n, load_wait_state.count(), is_producer_load_needed);
+        
+        // Thread-local computations
+        for (int epi_v = 0; epi_v < EPI_V; ++epi_v) {
+            tRS_rCompute_frg(epi_v) = cst_callbacks.visit(
+                tRS_rAcc_frg_mn(r2s_v + epi_v), epi_v, epi_m, epi_n);
+        }
+        
+        // Reduction and store operations
+        cst_callbacks.reduce(sD_epi, synchronize, epi_m, epi_n, is_last_iteration, tRS_rCompute_frg);
+        cst_callbacks.postreduce(epi_m, epi_n, store_pipe_producer_state.count(), issue_smem_store);
+        cst_callbacks.tma_store(epi_m, epi_n, store_pipe_producer_state.count(), issue_tma_store);
+        cst_callbacks.end_loop(epi_m, epi_n);
+    }
+}
+cst_callbacks.end(); // Cross-CTA reductions
+```
+
+#### **EVT Advantages Over Manual Implementation**
+
+| Aspect | Manual Epilogue | EVT-Based Epilogue |
+|--------|-----------------|-------------------|
+| **Complexity** | High (per-kernel) | Low (composable) |
+| **Reusability** | None | High (shared patterns) |
+| **Maintainability** | Difficult | Easy (modular) |
+| **Performance** | Manual optimization | Automatic optimization |
+| **Flexibility** | Limited | High (arbitrary composition) |
+
+#### **Common EVT Patterns**
+
+1. **Bias + Activation**: `LinCombPerRowBiasEltActAux`
+2. **Residual Connection**: `LinCombResidualEltActAux`
+3. **Scalar Operations**: `Sm90ScalarBroadcast`
+4. **Auxiliary Data**: `Sm90AuxLoad`
+5. **Reductions**: `Sm90Reduction`
 
 ---
 
@@ -255,6 +409,14 @@ This section contains questions that arise from ambiguous behavior or undocument
 15. **Migration Paths**: What are the considerations when migrating between these interfaces for existing codebases?
 
 16. **Best Practices**: What are the recommended use cases for each interface, and when should developers choose one over the others?
+
+17. **EVT Integration**: How do Epilogue Visitor Trees integrate with other interfaces beyond Cutlass? Are there equivalent patterns in nvFuser, CUTE, or CuTeDSL?
+
+18. **EVT Performance**: What are the performance implications of using EVT vs manual epilogue implementation? Are there overhead costs to the visitor pattern?
+
+19. **EVT Complexity**: How complex can EVT compositions become before they impact compile times or code maintainability?
+
+20. **EVT Extensibility**: What are the limitations of the EVT system for custom epilogue operations? When would developers need to fall back to manual implementation?
 
 ---
 
