@@ -152,12 +152,15 @@ TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16)
 fusion->addInput(A);
 fusion->addInput(B);
 TensorView* acc = fusedMultiplySum(A, B, {-1});
-TensorView* param1 = TensorViewBuilder().shape({1}).dtype(DataType::Float);
-TensorView* param2 = TensorViewBuilder().shape({1}).dtype(DataType::Float);
-fusion->addInput(param1);
-fusion->addInput(param2);
+// Epilogue is acc * alpha + beta * C
+Val* alpha = IrBuilder::create<Val>(DataType::Float);
+Val* beta = IrBuilder::create<Val>(DataType::Float);
+fusion->addInput(alpha);
+fusion->addInput(beta);
 // Custom operation: output = custom_operation(acc, param1, param2)
-TensorView* output = customOperation(acc, param1, param2);
+TensorView* alpha_acc = mul(alpha, acc);
+TensorView* beta_C = mul(beta, C);
+TensorView* output = add(alpha_acc, beta_C);
 TensorView* output_bf16 = castOp(DataType::BFloat16, output);
 fusion->addOutput(output_bf16);
 ```
@@ -165,17 +168,27 @@ fusion->addOutput(output_bf16);
 **nvFuser Fusion Flow:**
 ```mermaid
 graph TD
-    A[Matmul Accumulator] --> B[Custom Operation]
-    C[Param1 Scalar] --> B
-    D[Param2 Scalar] --> B
-    B --> E[Custom Result]
-    E --> F[Output Fragment]
+    A[A Tensor] --> E[fusedMultiplySum]
+    B[B Tensor] --> E
+    E --> F[Matmul Accumulator]
+    G[Alpha Scalar] --> H[mul]
+    F --> H
+    H --> I[alpha * acc]
+    J[Beta Scalar] --> K[mul]
+    L[C Tensor] --> K
+    K --> M[beta * C]
+    I --> N[add]
+    M --> N
+    N --> O[output]
+    O --> P[castOp]
+    P --> Q[Final Output]
     
     style A fill:#e1f5fe
-    style C fill:#ffecb3
-    style D fill:#ffecb3
-    style F fill:#c8e6c9
-    style B fill:#fff3e0
+    style B fill:#e1f5fe
+    style L fill:#e1f5fe
+    style G fill:#ffecb3
+    style J fill:#ffecb3
+    style Q fill:#c8e6c9
 ```
 
 **Generated C++ Code:**
