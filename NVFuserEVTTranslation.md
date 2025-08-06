@@ -45,27 +45,7 @@ The translation strategy involves three main phases:
 2. **Translation Phase**: Map nvFuser operations to Cutlass EVT patterns
 3. **Code Generation Phase**: Generate C++ code that constructs the appropriate EVT
 
-### 2.2 Architecture Overview
-
-```mermaid
-flowchart TD
-    A[nvFuser Fusion Graph] --> B[Analysis Phase]
-    B --> C[Epilogue Operation Tree]
-    C --> D[Translation Phase]
-    D --> E[Cutlass EVT Specification]
-    E --> F[Code Generation Phase]
-    F --> G[C++ Source Code]
-    G --> H[Compilation]
-    H --> I[Optimized CUDA Kernel]
-    
-    style A fill:#e1f5fe
-    style I fill:#c8e6c9
-    style B fill:#fff3e0
-    style D fill:#fff3e0
-    style F fill:#fff3e0
-```
-
-### 2.3 Runtime Code Generation Strategy
+### 2.2 Runtime Code Generation Strategy
 
 The system will generate C++ code at runtime that:
 - Defines custom EVT node types when needed
@@ -82,7 +62,19 @@ The system will generate C++ code at runtime that:
 **nvFuser Pattern:**
 ```cpp
 // nvFuser fusion operation
-auto output = alpha * acc + beta * C;
+// acc is the matmul result and C is a bias tensor
+TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::BFloat16);
+TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16);
+fusion->addInput(A);
+fusion->addInput(B);
+fusion->addInput(C);
+TensorView* acc = fusedMultiplySum(A, B, {-1});
+TensorView* alpha_acc = mul(alpha, acc);
+TensorView* beta_C = mul(beta, C);
+// output = alpha * acc + beta * C;
+TensorView* output = add(alpha_acc, beta_C);
+TensorView* output_bf16 = castOp(DataType::BFloat16, output);
+fusion->addOutput(output_bf16);
 ```
 
 **Generated C++ Code:**
