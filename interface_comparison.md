@@ -356,11 +356,11 @@ cst_callbacks.end(); // Cross-CTA reductions
 
 #### **Common EVT Patterns**
 
-1. **Bias + Activation**: [`LinCombPerRowBiasEltActAux`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L37)
-2. **Residual Connection**: [`LinCombResidualEltActAux`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L45)
-3. **Scalar Operations**: [`Sm90ScalarBroadcast`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L53)
-4. **Auxiliary Data**: [`Sm90AuxLoad`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L61)
-5. **Reductions**: [`Sm90Reduction`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L69)
+1. **Bias + Activation**: [`LinCombPerRowBiasEltActAux`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L250)
+2. **Residual Connection**: [`PerColResAddPerColBiasEltAct`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L333)
+3. **Scalar Operations**: [`Sm90ScalarBroadcast`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/sm90_visitor_load_tma_warpspecialized.hpp#L613)
+4. **Auxiliary Data**: [`Sm90AuxLoad`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/sm90_visitor_load_tma_warpspecialized.hpp#L203)
+5. **Reductions**: [`Sm90ScalarReduction`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/sm90_visitor_store_tma_warpspecialized.hpp#L470)
 
 ---
 
