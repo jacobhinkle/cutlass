@@ -44,6 +44,8 @@ This document provides a comprehensive comparison of common features across four
    - [7.4 Documentation and API Questions](#74-documentation-and-api-questions)
    - [7.5 Integration Questions](#75-integration-questions)
 
+8. [8. Circular Buffered GEMM Implementation Guide](#8-circular-buffered-gemm-implementation-guide)
+
 ---
 
 ## 1. Introduction
@@ -157,18 +159,18 @@ This comparison shows how these four interfaces provide different approaches to 
 
 ## 4. Syncing
 
-### 4.1 Asynchronous Memory Operations
+---
+
+## 5. Circular Buffering and Syncing
+
+### 5.1 Asynchronous Memory Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
 | **TMA (Tensor Memory Accelerator)** | [`LoadStoreOpType::CpAsyncBulk`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy_traits_sm90_tma`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/copy_traits_sm90_tma.hpp#L1368) | Unknown | [`Tma` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
 | **Asynchronous Copy** | [`TensorView` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/algorithm/copy.hpp#L398) | Unknown | [`Copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
 
----
-
-## 5. Circular Buffering and Syncing
-
-### 5.1 Mbarrier Operations
+### 5.2 Mbarrier Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
@@ -177,7 +179,7 @@ This comparison shows how these four interfaces provide different approaches to 
 | **Mbarrier Wait** | [`mbarrier::wait()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/runtime/mbarrier.cu#L75) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm90_desc.hpp#L89) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L160) | [`MbarrierArray::wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L245) |
 | **Mbarrier Invalidate** | [`MBarrierInvalidate`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1020) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/mbarrier.cu#L30) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L50) | [`MbarrierArray::arrive_and_drop()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L275) |
 
-### 5.2 Fence Operations
+### 5.3 Fence Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
@@ -186,7 +188,7 @@ This comparison shows how these four interfaces provide different approaches to 
 | **Block Sync** | [`BlockSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4070) | Layout operations | Unknown | [`block_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/block_sync_default.cu#L25) |
 | **Grid Sync** | [`GridSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4090) | Layout operations | Unknown | [`grid_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/grid_sync.cu#L43) |
 
-### 5.3 Circular Buffer Management
+### 5.4 Circular Buffer Management
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
@@ -255,4 +257,161 @@ This section contains questions that arise from ambiguous behavior or undocument
 
 15. **Migration Paths**: What are the considerations when migrating between these interfaces for existing codebases?
 
-16. **Best Practices**: What are the recommended use cases for each interface, and when should developers choose one over the others? 
+16. **Best Practices**: What are the recommended use cases for each interface, and when should developers choose one over the others?
+
+---
+
+## 8. Circular Buffered GEMM Implementation Guide
+
+This section provides practical guidance on implementing circular buffered GEMM kernels in each interface. Circular buffering is essential for overlapping computation with memory transfers, maximizing GPU utilization.
+
+#### **nvFuser Implementation**
+
+nvFuser provides automatic circular buffering through its fusion system:
+
+```cpp
+// Define circular buffer depth
+auto tv = TensorViewBuilder().shape({M, N}).dtype(DataType::Float).build();
+tv->setCircularBufferDepth(2); // 2-stage circular buffer
+
+// TMA operations are automatically circular buffered
+auto tma_load = IrBuilder::create<LoadStoreOp>(
+    tv, LoadStoreOpType::CpAsyncBulk, tma_descriptor);
+
+// The fusion system automatically handles:
+// - Mbarrier initialization and management
+// - Producer-consumer synchronization
+// - Memory allocation for multiple stages
+```
+
+**Key Features:**
+- **Automatic Management**: Circular buffer stages are managed automatically
+- **TMA Integration**: Direct support for TMA operations with circular buffering
+- **Fusion Optimization**: Circular buffering is integrated with kernel fusion
+
+#### **CUTE Implementation**
+
+CUTE provides layout-based circular buffering through its pipeline abstractions:
+
+```cpp
+// Define pipeline with circular buffering
+using Pipeline = cute::PipelineAsync<2>; // 2-stage pipeline
+
+// Create mbarrier array for synchronization
+auto mbarrier_array = cute::MbarrierArray<2>(barrier_storage);
+
+// TMA copy with circular buffering
+auto tma_copy = cute::copy_traits_sm90_tma<GmemLayout, SmemLayout>();
+tma_copy.copy_async(gmem_ptr, smem_ptr, tma_descriptor);
+
+// Pipeline management
+Pipeline::producer_acquire(0); // Acquire stage 0
+tma_copy.copy_async();         // Load into stage 0
+Pipeline::producer_commit(0);  // Commit stage 0
+
+Pipeline::consumer_acquire(0); // Consumer acquires stage 0
+// ... GEMM computation on stage 0 ...
+Pipeline::consumer_release(0); // Release stage 0
+```
+
+**Key Features:**
+- **Layout-Based**: Circular buffering integrated with CUTE's layout system
+- **Pipeline Abstractions**: High-level pipeline management
+- **TMA Support**: Direct integration with TMA copy operations
+
+#### **CuTeDSL Implementation**
+
+CuTeDSL provides Python-based circular buffering through its pipeline system:
+
+```python
+from cutlass import PipelineAsync, MbarrierArray
+
+# Create 2-stage pipeline
+pipeline = PipelineAsync(num_stages=2)
+
+# Initialize mbarrier array
+mbarrier_array = MbarrierArray(
+    barrier_storage=barrier_ptr,
+    num_stages=2,
+    agent=(PipelineOp.TmaLoad, CooperativeGroup.WarpGroup)
+)
+
+# Circular buffered TMA load
+for stage in range(num_iterations):
+    # Producer phase
+    pipeline.producer_acquire(stage % 2)
+    tma_load.copy_async(gmem_ptr, smem_ptr, tma_descriptor)
+    pipeline.producer_commit(stage % 2)
+    
+    # Consumer phase  
+    pipeline.consumer_acquire(stage % 2)
+    # ... GEMM computation on current stage ...
+    pipeline.consumer_release(stage % 2)
+```
+
+**Key Features:**
+- **Python Interface**: High-level Python API for circular buffering
+- **Pipeline Management**: Built-in pipeline synchronization
+- **Mbarrier Integration**: Direct mbarrier array management
+
+#### **Cutlass Implementation**
+
+Cutlass provides circular buffering through its pipeline templates:
+
+```cpp
+// Define pipeline with circular buffering
+using Pipeline = cutlass::PipelineTmaAsync<2>; // 2-stage pipeline
+
+// Shared storage for pipeline
+struct SharedStorage {
+    typename Pipeline::SharedStorage pipeline;
+    cutlass::Array<Element, SmemCapacity> smem_buffer;
+};
+
+// Pipeline initialization
+Pipeline pipeline;
+pipeline.init_barriers(storage.pipeline, params);
+
+// Circular buffered GEMM
+for (int stage = 0; stage < num_stages; ++stage) {
+    // Producer: Load next tile
+    pipeline.producer_acquire(stage % 2);
+    cutlass::gemm::device::GemmUniversalAdapter<
+        cutlass::gemm::kernel::DefaultGemm<
+            Element, LayoutA, Element, LayoutB, Element, LayoutC,
+            Element, cutlass::arch::OpClassTensorOp,
+            cutlass::arch::Sm90
+        >
+    >::launch(params);
+    pipeline.producer_commit(stage % 2);
+    
+    // Consumer: Compute on current tile
+    pipeline.consumer_acquire(stage % 2);
+    // ... GEMM computation ...
+    pipeline.consumer_release(stage % 2);
+}
+```
+
+**Key Features:**
+- **Template-Based**: Circular buffering integrated with GEMM templates
+- **TMA Integration**: Direct support for TMA operations
+- **Performance Optimized**: Highly optimized for GEMM workloads
+
+#### **Implementation Comparison**
+
+| Aspect | nvFuser | CUTE | CuTeDSL | Cutlass |
+|--------|---------|------|----------|---------|
+| **Abstraction Level** | High (Automatic) | Medium (Layout-based) | High (Python) | Medium (Template-based) |
+| **TMA Integration** | Direct | Direct | Direct | Direct |
+| **Memory Management** | Automatic | Manual | Semi-automatic | Manual |
+| **Synchronization** | Automatic | Manual | Semi-automatic | Manual |
+| **Performance** | Optimized | Optimized | Good | Highly Optimized |
+| **Ease of Use** | Easiest | Medium | Easy | Medium |
+
+#### **Best Practices**
+
+1. **Stage Count**: Use 2-3 stages for optimal performance
+2. **Memory Alignment**: Ensure proper memory alignment for TMA operations
+3. **Synchronization**: Properly manage producer-consumer synchronization
+4. **Error Handling**: Implement proper error handling for edge cases
+5. **Performance Tuning**: Profile and tune based on specific workload characteristics 
