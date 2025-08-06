@@ -171,16 +171,20 @@ graph TD
     A[A Tensor] --> E[fusedMultiplySum]
     B[B Tensor] --> E
     E --> F[Matmul Accumulator]
-    G[Alpha Scalar] --> H[mul]
-    F --> H
-    H --> I[alpha * acc]
-    J[Beta Scalar] --> K[mul]
-    L[C Tensor] --> K
-    K --> M[beta * C]
-    I --> N[add]
-    M --> N
-    N --> O[output]
-    O --> P[castOp]
+    
+    subgraph Epilogue ["Epilogue"]
+        G[Alpha Scalar] --> H[mul]
+        F --> H
+        H --> I[alpha * acc]
+        J[Beta Scalar] --> K[mul]
+        L[C Tensor] --> K
+        K --> M[beta * C]
+        I --> N[add]
+        M --> N
+        N --> O[output]
+        O --> P[castOp]
+    end
+    
     P --> Q[Final Output]
     
     style A fill:#e1f5fe
@@ -189,6 +193,7 @@ graph TD
     style G fill:#ffecb3
     style J fill:#ffecb3
     style Q fill:#c8e6c9
+    style Epilogue fill:#f3e5f5
 ```
 
 **Generated C++ Code:**
@@ -268,23 +273,27 @@ graph TD
     A[A Tensor] --> E[fusedMultiplySum]
     B[B Tensor] --> E
     E --> F[Matmul Accumulator]
-    G[Alpha Scalar] --> H[mul]
-    F --> H
-    H --> I[alpha * acc]
-    J[Beta1 Scalar] --> K[mul]
-    L[Bias1 Tensor] --> K
-    K --> M[beta1 * bias1]
-    N[Gamma Scalar] --> O[mul]
-    P[Bias2 Tensor] --> O
-    O --> Q[gamma * bias2]
-    I --> R[add]
-    M --> R
-    R --> S[output1]
-    I --> T[add]
-    Q --> T
-    T --> U[output2]
-    S --> V[castOp]
-    U --> W[castOp]
+    
+    subgraph Epilogue ["Epilogue"]
+        G[Alpha Scalar] --> H[mul]
+        F --> H
+        H --> I[alpha * acc]
+        J[Beta1 Scalar] --> K[mul]
+        L[Bias1 Tensor] --> K
+        K --> M[beta1 * bias1]
+        N[Gamma Scalar] --> O[mul]
+        P[Bias2 Tensor] --> O
+        O --> Q[gamma * bias2]
+        I --> R[add]
+        M --> R
+        R --> S[output1]
+        I --> T[add]
+        Q --> T
+        T --> U[output2]
+        S --> V[castOp]
+        U --> W[castOp]
+    end
+    
     V --> X[Final Output1]
     W --> Y[Final Output2]
     
@@ -297,6 +306,7 @@ graph TD
     style N fill:#ffecb3
     style X fill:#c8e6c9
     style Y fill:#c8e6c9
+    style Epilogue fill:#f3e5f5
 ```
 
 **nvFuser Pattern:**
