@@ -3,29 +3,64 @@
 ## Table of Contents
 
 1. [Introduction](#1-introduction)
+
+   1.1 [Key Concepts](#11-key-concepts)
+
+   1.2 [Motivation](#12-motivation)
+
 2. [Overview of Translation Strategy](#2-overview-of-translation-strategy)
-   2.1. [Translation Strategy Overview](#21-translation-strategy-overview)
-   2.2. [Core Translation Patterns](#22-core-translation-patterns)
+
+   2.1 [High-Level Approach](#21-high-level-approach)
+
+   2.2 [Runtime Code Generation Strategy](#22-runtime-code-generation-strategy)
+
 3. [Example nvFuser Pattern](#3-example-nvfuser-pattern)
-   3.1. [Basic Linear Operations](#31-basic-linear-operations)
+
+   3.1 [Basic Linear Operations](#31-basic-linear-operations)
+
 4. [EVT Node Translation](#4-evt-node-translation)
-   4.1. [Operation Mapping Table](#41-operation-mapping-table)
-   4.2. [Custom Operation Translation](#42-custom-operation-translation)
-   4.3. [Multiple Aux Inputs and Outputs Example](#43-multiple-aux-inputs-and-outputs-example)
+
+   4.1 [Operation Mapping Table](#41-operation-mapping-table)
+
+   4.2 [Custom Operation Translation](#42-custom-operation-translation)
+
+   4.3 [Multiple Aux Inputs and Outputs Example](#43-multiple-aux-inputs-and-outputs-example)
+
 5. [Fusion Operation Mapping](#5-fusion-operation-mapping)
-   5.1. [nvFuser to EVT Translation Rules](#51-nvfuser-to-evt-translation-rules)
-   5.2. [Memory Layout Translation](#52-memory-layout-translation)
-   5.3. [Data Type Translation](#53-data-type-translation)
+
+   5.1 [nvFuser to EVT Translation Rules](#51-nvfuser-to-evt-translation-rules)
+
+   5.2 [Memory Layout Translation](#52-memory-layout-translation)
+
+   5.3 [Data Type Translation](#53-data-type-translation)
+
 6. [Advanced Patterns](#6-advanced-patterns)
-   6.1. [Multi-Stage Epilogues](#61-multi-stage-epilogues)
-   6.2. [Conditional Operations](#62-conditional-operations)
-   6.3. [Reduction Patterns](#63-reduction-patterns)
+
+   6.1 [Multi-Stage Epilogues](#61-multi-stage-epilogues)
+
+   6.2 [Conditional Operations](#62-conditional-operations)
+
+   6.3 [Reduction Patterns](#63-reduction-patterns)
+
 7. [Implementation Strategy](#7-implementation-strategy)
-   7.1. [Integration with nvFuser](#71-integration-with-nvfuser)
-   7.2. [Runtime Compilation](#72-runtime-compilation)
-   7.3. [Performance Optimization](#73-performance-optimization)
+
+   7.1 [Integration with nvFuser](#71-integration-with-nvfuser)
+
+   7.2 [Runtime Compilation](#72-runtime-compilation)
+
+   7.3 [Performance Optimization](#73-performance-optimization)
+
 8. [Questions and Ambiguities](#8-questions-and-ambiguities)
-   8.1. [Architecture and Compatibility](#81-architecture-and-compatibility)
+
+   8.1 [Architecture and Compatibility](#81-architecture-and-compatibility)
+
+   8.2 [Performance and Optimization](#82-performance-and-optimization)
+
+   8.3 [Implementation Details](#83-implementation-details)
+
+   8.4 [Advanced Features](#84-advanced-features)
+
+   8.5 [Integration and Deployment](#85-integration-and-deployment)
 
 ---
 
@@ -138,6 +173,41 @@ fusion->addOutput(output_bf16);
 
 For operations not available in Cutlass, the system generates custom EVT nodes:
 
+**nvFuser Pattern:**
+```cpp
+// nvFuser fusion operation with custom operation
+TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::BFloat16);
+TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16);
+fusion->addInput(A);
+fusion->addInput(B);
+TensorView* acc = fusedMultiplySum(A, B, {-1});
+TensorView* param1 = TensorViewBuilder().shape({1}).dtype(DataType::Float);
+TensorView* param2 = TensorViewBuilder().shape({1}).dtype(DataType::Float);
+fusion->addInput(param1);
+fusion->addInput(param2);
+// Custom operation: output = custom_operation(acc, param1, param2)
+TensorView* output = customOperation(acc, param1, param2);
+TensorView* output_bf16 = castOp(DataType::BFloat16, output);
+fusion->addOutput(output_bf16);
+```
+
+**nvFuser Fusion Flow:**
+```mermaid
+graph TD
+    A[Matmul Accumulator] --> B[Custom Operation]
+    C[Param1 Scalar] --> B
+    D[Param2 Scalar] --> B
+    B --> E[Custom Result]
+    E --> F[Output Fragment]
+    
+    style A fill:#e1f5fe
+    style C fill:#ffecb3
+    style D fill:#ffecb3
+    style F fill:#c8e6c9
+    style B fill:#fff3e0
+```
+
+**Generated C++ Code:**
 ```cpp
 // Better approach using Cutlass EVT framework for: output = alpha * acc + beta * C
 // This leverages Sm90AuxLoad for automatic fragment loading
