@@ -267,13 +267,10 @@ nvFuser provides automatic circular buffering through its fusion system:
 ```cpp
 // Define circular buffer depth
 auto tv = TensorViewBuilder().shape({M, N}).dtype(DataType::Float).build();
-tv->setCircularBufferDepth(2); // 2-stage circular buffer
-
-// TMA operations are automatically circular buffered
-auto tma_load = IrBuilder::create<LoadStoreOp>(
-    tv, LoadStoreOpType::CpAsyncBulk, tma_descriptor);
+tv->circularBuffer(2); // 2-stage circular buffer
 
 // The fusion system automatically handles:
+// - TMA operations with circular buffering
 // - Mbarrier initialization and management
 // - Producer-consumer synchronization
 // - Memory allocation for multiple stages
