@@ -26,25 +26,23 @@ This document provides a comprehensive comparison of common features across four
    - [3.2 Tensor Core MMA Operations](#32-tensor-core-mma-operations)
    - [3.3 Mathematical Operations](#33-mathematical-operations)
 
-4. [4. Syncing](#4-syncing)
+4. [4. Circular Buffering and Syncing](#4-circular-buffering-and-syncing)
    - [4.1 Asynchronous Memory Operations](#41-asynchronous-memory-operations)
+   - [4.2 Mbarrier Operations](#42-mbarrier-operations)
+   - [4.3 Fence Operations](#43-fence-operations)
+   - [4.4 Circular Buffer Management](#44-circular-buffer-management)
 
-5. [5. Circular Buffering and Syncing](#5-circular-buffering-and-syncing)
-   - [5.1 Mbarrier Operations](#51-mbarrier-operations)
-   - [5.2 Fence Operations](#52-fence-operations)
-   - [5.3 Circular Buffer Management](#53-circular-buffer-management)
+5. [5. Epilogue Fusion](#5-epilogue-fusion)
+   - [5.1 Bias and Activation Operations](#51-bias-and-activation-operations)
 
-6. [6. Epilogue Fusion](#6-epilogue-fusion)
-   - [6.1 Bias and Activation Operations](#61-bias-and-activation-operations)
+6. [6. Questions for Further Investigation](#6-questions-for-further-investigation)
+   - [6.1 Interface Coverage Questions](#61-interface-coverage-questions)
+   - [6.2 Implementation Questions](#62-implementation-questions)
+   - [6.3 Performance and Optimization Questions](#63-performance-and-optimization-questions)
+   - [6.4 Documentation and API Questions](#64-documentation-and-api-questions)
+   - [6.5 Integration Questions](#65-integration-questions)
 
-7. [7. Questions for Further Investigation](#7-questions-for-further-investigation)
-   - [7.1 Interface Coverage Questions](#71-interface-coverage-questions)
-   - [7.2 Implementation Questions](#72-implementation-questions)
-   - [7.3 Performance and Optimization Questions](#73-performance-and-optimization-questions)
-   - [7.4 Documentation and API Questions](#74-documentation-and-api-questions)
-   - [7.5 Integration Questions](#75-integration-questions)
-
-8. [8. Circular Buffered GEMM Implementation Guide](#8-circular-buffered-gemm-implementation-guide)
+7. [7. Circular Buffered GEMM Implementation Guide](#7-circular-buffered-gemm-implementation-guide)
 
 ---
 
@@ -155,22 +153,19 @@ This comparison shows how these four interfaces provide different approaches to 
 | **Broadcast** | [`IterType::Broadcast`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L180) | Zero-stride layouts | Unknown | GEMM operations |
 | **Gather/Scatter** | [`IterType::GatherScatter`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L185) | Strided layouts | Unknown | GEMM operations |
 
----
-
-## 4. Syncing
 
 ---
 
-## 5. Circular Buffering and Syncing
+## 4. Circular Buffering and Syncing
 
-### 5.1 Asynchronous Memory Operations
+### 4.1 Asynchronous Memory Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
 | **TMA (Tensor Memory Accelerator)** | [`LoadStoreOpType::CpAsyncBulk`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy_traits_sm90_tma`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/copy_traits_sm90_tma.hpp#L1368) | Unknown | [`Tma` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
 | **Asynchronous Copy** | [`TensorView` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/algorithm/copy.hpp#L398) | Unknown | [`Copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
 
-### 5.2 Mbarrier Operations
+### 4.2 Mbarrier Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
@@ -179,7 +174,7 @@ This comparison shows how these four interfaces provide different approaches to 
 | **Mbarrier Wait** | [`mbarrier::wait()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/runtime/mbarrier.cu#L75) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm90_desc.hpp#L89) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L160) | [`MbarrierArray::wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L245) |
 | **Mbarrier Invalidate** | [`MBarrierInvalidate`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1020) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/mbarrier.cu#L30) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L50) | [`MbarrierArray::arrive_and_drop()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L275) |
 
-### 5.3 Fence Operations
+### 4.3 Fence Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
@@ -188,7 +183,7 @@ This comparison shows how these four interfaces provide different approaches to 
 | **Block Sync** | [`BlockSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4070) | Layout operations | Unknown | [`block_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/block_sync_default.cu#L25) |
 | **Grid Sync** | [`GridSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4090) | Layout operations | Unknown | [`grid_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/grid_sync.cu#L43) |
 
-### 5.4 Circular Buffer Management
+### 4.4 Circular Buffer Management
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
@@ -198,9 +193,9 @@ This comparison shows how these four interfaces provide different approaches to 
 
 ---
 
-## 6. Epilogue Fusion
+## 5. Epilogue Fusion
 
-### 6.1 Bias and Activation Operations
+### 5.1 Bias and Activation Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
@@ -213,11 +208,11 @@ This comparison shows how these four interfaces provide different approaches to 
 
 ---
 
-## 7. Questions for Further Investigation
+## 6. Questions for Further Investigation
 
 This section contains questions that arise from ambiguous behavior or undocumented information in the interfaces. These questions should be reviewed and addressed in future iterations of this document.
 
-### 7.1 Interface Coverage Questions
+### 6.1 Interface Coverage Questions
 
 1. **CuTeDSL Layout Operations**: What specific layout transformation operations are available in CuTeDSL beyond the basic mbarrier and pipeline operations documented here?
 
@@ -227,7 +222,7 @@ This section contains questions that arise from ambiguous behavior or undocument
 
 4. **CUTE vs CuTeDSL Distinction**: What is the exact relationship between CUTE (C++ library) and CuTeDSL (Python interface)? Are they the same underlying system with different interfaces, or fundamentally different implementations?
 
-### 7.2 Implementation Questions
+### 6.2 Implementation Questions
 
 5. **Mbarrier Implementation Consistency**: Are the mbarrier implementations across all four interfaces (nvFuser, CUTE, CuTeDSL, Cutlass) functionally equivalent, or do they have different semantics?
 
@@ -235,7 +230,7 @@ This section contains questions that arise from ambiguous behavior or undocument
 
 7. **Circular Buffer Synchronization**: How do the circular buffer implementations handle edge cases like buffer overflow, underflow, and synchronization between producer and consumer threads?
 
-### 7.3 Performance and Optimization Questions
+### 6.3 Performance and Optimization Questions
 
 8. **Layout Optimization**: How do the different layout systems (nvFuser's IterDomain, CUTE's Layout, CuTeDSL's layout operations, Cutlass's CUTE integration) compare in terms of compile-time vs runtime optimization?
 
@@ -243,7 +238,7 @@ This section contains questions that arise from ambiguous behavior or undocument
 
 10. **Hardware Utilization**: How do the different interfaces utilize Tensor Cores, TMA units, and other hardware accelerators? Are there performance differences in similar operations?
 
-### 7.4 Documentation and API Questions
+### 6.4 Documentation and API Questions
 
 11. **API Completeness**: Are there missing operations in this comparison that are important for real-world applications?
 
@@ -251,7 +246,7 @@ This section contains questions that arise from ambiguous behavior or undocument
 
 13. **Error Handling**: How do the different interfaces handle error conditions, invalid operations, and debugging support?
 
-### 7.5 Integration Questions
+### 6.5 Integration Questions
 
 14. **Interoperability**: Can these interfaces be used together in the same application, or are they mutually exclusive?
 
@@ -261,7 +256,7 @@ This section contains questions that arise from ambiguous behavior or undocument
 
 ---
 
-## 8. Circular Buffered GEMM Implementation Guide
+## 7. Circular Buffered GEMM Implementation Guide
 
 This section provides practical guidance on implementing circular buffered GEMM kernels in each interface. Circular buffering is essential for overlapping computation with memory transfers, maximizing GPU utilization.
 
