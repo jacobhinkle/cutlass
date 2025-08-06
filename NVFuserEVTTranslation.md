@@ -74,6 +74,32 @@ The system will generate C++ code at runtime that:
 
 ### 3.1 Basic Linear Operations
 
+**nvFuser Fusion Flow:**
+```mermaid
+graph TD
+    A[A Tensor] --> E[fusedMultiplySum]
+    B[B Tensor] --> E
+    E --> F[Matmul Accumulator]
+    G[Alpha Scalar] --> H[mul]
+    F --> H
+    H --> I[alpha * acc]
+    J[Beta Scalar] --> K[mul]
+    L[C Tensor] --> K
+    K --> M[beta * C]
+    I --> N[add]
+    M --> N
+    N --> O[output]
+    O --> P[castOp]
+    P --> Q[Final Output]
+    
+    style A fill:#e1f5fe
+    style B fill:#e1f5fe
+    style L fill:#e1f5fe
+    style G fill:#ffecb3
+    style J fill:#ffecb3
+    style Q fill:#c8e6c9
+```
+
 **nvFuser Pattern:**
 ```cpp
 // nvFuser fusion operation
@@ -161,24 +187,63 @@ typename EVTOp::Arguments epilogue_args{
 };
 ```
 
-**Fusion Flow:**
+**EVT Flow:**
 ```mermaid
 graph TD
-    A[Matmul Accumulator] --> B[Sm90AuxLoad C]
-    C[C Tensor] --> B
-    D[Alpha Scalar] --> E[LinearCombinationCompute]
-    F[Beta Scalar] --> E
+    A[Matmul Accumulator] --> E[LinearCombinationCompute]
+    C[C Tensor] --> B[Sm90AuxLoad C]
     B --> E
+    D[Alpha Scalar] --> E
+    F[Beta Scalar] --> E
     E --> G[Output Fragment]
     
     style A fill:#e1f5fe
+    style C fill:#e1f5fe
+    style D fill:#ffecb3
+    style F fill:#ffecb3
     style G fill:#c8e6c9
     style B fill:#fff3e0
     style E fill:#fff3e0
 ```
-```
 
 ### 4.3 Multiple Aux Inputs and Outputs Example
+
+**nvFuser Fusion Flow:**
+```mermaid
+graph TD
+    A[A Tensor] --> E[fusedMultiplySum]
+    B[B Tensor] --> E
+    E --> F[Matmul Accumulator]
+    G[Alpha Scalar] --> H[mul]
+    F --> H
+    H --> I[alpha * acc]
+    J[Beta1 Scalar] --> K[mul]
+    L[Bias1 Tensor] --> K
+    K --> M[beta1 * bias1]
+    N[Gamma Scalar] --> O[mul]
+    P[Bias2 Tensor] --> O
+    O --> Q[gamma * bias2]
+    I --> R[add]
+    M --> R
+    R --> S[output1]
+    I --> T[add]
+    Q --> T
+    T --> U[output2]
+    S --> V[castOp]
+    U --> W[castOp]
+    V --> X[Final Output1]
+    W --> Y[Final Output2]
+    
+    style A fill:#e1f5fe
+    style B fill:#e1f5fe
+    style L fill:#e1f5fe
+    style P fill:#e1f5fe
+    style G fill:#ffecb3
+    style J fill:#ffecb3
+    style N fill:#ffecb3
+    style X fill:#c8e6c9
+    style Y fill:#c8e6c9
+```
 
 **nvFuser Pattern:**
 ```cpp
@@ -271,7 +336,7 @@ typename EVTOp::Arguments epilogue_args{
 };
 ```
 
-**Fusion Flow:**
+**EVT Flow:**
 ```mermaid
 graph TD
     A[Matmul Accumulator] --> B[DualOutputLinearCombination]
@@ -286,6 +351,11 @@ graph TD
     B --> K[Output2: alpha * acc + gamma * bias2]
     
     style A fill:#e1f5fe
+    style F fill:#e1f5fe
+    style H fill:#e1f5fe
+    style C fill:#ffecb3
+    style D fill:#ffecb3
+    style E fill:#ffecb3
     style J fill:#c8e6c9
     style K fill:#c8e6c9
     style B fill:#fff3e0
