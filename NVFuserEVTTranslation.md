@@ -332,9 +332,13 @@ fusion->addOutput(output2_bf16);
 // EVT approach with two aux inputs and two outputs
 // 1. Define auxiliary load operations for both bias tensors
 using AuxLoadBias1 = cutlass::epilogue::fusion::Sm90AuxLoad<
-    Stages, EpilogueTile, ElementCompute, StrideMNL, SmemLayoutAtom, CopyOpS2R>;
+    Mma::NumStages, EpilogueTile, ElementCompute, 
+    cutlass::layout::RowMajor, cutlass::gemm::collective::SmemLayoutAtomAuto,
+    cutlass::epilogue::thread::LinearCombination<ElementCompute, ElementCompute, ElementCompute>>;
 using AuxLoadBias2 = cutlass::epilogue::fusion::Sm90AuxLoad<
-    Stages, EpilogueTile, ElementCompute, StrideMNL, SmemLayoutAtom, CopyOpS2R>;
+    Mma::NumStages, EpilogueTile, ElementCompute, 
+    cutlass::layout::RowMajor, cutlass::gemm::collective::SmemLayoutAtomAuto,
+    cutlass::epilogue::thread::LinearCombination<ElementCompute, ElementCompute, ElementCompute>>;
 
 // 2. Define the computation operation with two outputs
 template<typename ElementCompute>
@@ -379,16 +383,14 @@ using EVTOp = cutlass::epilogue::fusion::Sm90EVT<
 >;
 
 // 4. Usage in epilogue arguments
-typename EVTOp::Arguments epilogue_args{
-    .alpha = alpha,
-    .beta1 = beta1,
-    .gamma = gamma,
-    .ptr_aux = bias1_ptr,     // For AuxLoadBias1
-    .dAux = bias1_stride,
-    .ptr_aux2 = bias2_ptr,    // For AuxLoadBias2  
-    .dAux2 = bias2_stride
+typename GemmKernel::EpilogueOutputOp::Arguments epilogue_args{
+    {alpha, beta1, gamma},  // DualOutputCompute arguments
+    {bias1, ldbias1},       // AuxLoadBias1 arguments
+    {bias2, ldbias2}        // AuxLoadBias2 arguments
 };
 ```
+
+**Complete Example:** See [dual_output_epilogue_example.cu](examples/dual_output_epilogue_example.cu) for a full working implementation of this dual-output epilogue pattern.
 
 **EVT Flow:**
 ```mermaid
