@@ -28,3 +28,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 add_subdirectory(tutorial)
+
+cutlass_example_add_executable(
+  cute_nvfuser_layout_correspondence
+  nvfuser_layout_correspondence.cu
+)
