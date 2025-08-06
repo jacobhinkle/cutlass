@@ -76,7 +76,7 @@ This document provides a comprehensive comparison of common features across four
 
 ### 1.2 Example Correspondence
 
-The file `cutlass/examples/cute/nvfuser_layout_correspondence.cu` demonstrates the correspondence between these interfaces:
+The file [`cutlass/examples/cute/nvfuser_layout_correspondence.cu`](https://github.com/jacobhinkle/cutlass/blob/jh/nvfuser_cute/examples/cute/nvfuser_layout_correspondence.cu) demonstrates the correspondence between these interfaces:
 
 - **Split**: `IterDomain::split()` ↔ `logical_divide()` ↔ Layout operations via CUTE
 - **Merge**: `IterDomain::merge()` ↔ `flatten()` ↔ Layout operations via CUTE
