@@ -75,7 +75,7 @@ void demonstrate_split() {
   
   // This corresponds to nvFuser:
   // IterDomain* original_id = new IterDomain(0, 64);
-  // auto [outer_id, inner_id] = IterDomain::split(original_id, 8, true);
+  // auto [outer_id, inner_id] = IterDomain::split(original_id, 8, /*inner_split=*/true);
 }
 
 // Demonstrate merge transformation  
@@ -92,8 +92,16 @@ void demonstrate_merge() {
   auto merged = make_layout(flatten(original.shape()));
   print_layout_info("After merge", merged);
   
+  // Strided example: (4, 8) with non-contiguous strides
+  auto strided_original = make_layout(Shape<Int<4>, Int<8>>{}, Stride<Int<8>, Int<1>>{});
+  print_layout_info("Strided original", strided_original);
+  
+  // Merge strided layout: (4, 8) -> 32
+  auto strided_merged = make_layout(flatten(strided_original.shape()));
+  print_layout_info("Strided merged", strided_merged);
+  
   // This corresponds to nvFuser:
-  // auto [outer_id, inner_id] = IterDomain::split(original_id, 8, true);
+  // auto [outer_id, inner_id] = IterDomain::split(original_id, 8, /*inner_split=*/true);
   // IterDomain* merged_id = IterDomain::merge(outer_id, inner_id);
 }
 
