@@ -47,16 +47,22 @@ The translation strategy involves three main phases:
 
 ### 2.2 Architecture Overview
 
-```
-nvFuser Fusion Graph
-    ↓ (Analysis)
-Epilogue Operation Tree
-    ↓ (Translation)
-Cutlass EVT Specification
-    ↓ (Code Generation)
-C++ Source Code
-    ↓ (Compilation)
-Optimized CUDA Kernel
+```mermaid
+flowchart TD
+    A[nvFuser Fusion Graph] --> B[Analysis Phase]
+    B --> C[Epilogue Operation Tree]
+    C --> D[Translation Phase]
+    D --> E[Cutlass EVT Specification]
+    E --> F[Code Generation Phase]
+    F --> G[C++ Source Code]
+    G --> H[Compilation]
+    H --> I[Optimized CUDA Kernel]
+    
+    style A fill:#e1f5fe
+    style I fill:#c8e6c9
+    style B fill:#fff3e0
+    style D fill:#fff3e0
+    style F fill:#fff3e0
 ```
 
 ### 2.3 Runtime Code Generation Strategy
