@@ -266,8 +266,9 @@ nvFuser provides automatic circular buffering through its fusion system:
 
 ```cpp
 // Define circular buffer depth
-auto tv = TensorViewBuilder().shape({M, N}).dtype(DataType::Float).build();
-tv->circularBuffer(2); // 2-stage circular buffer
+TensorView* smem_tv = input_tv->cacheAfter(LoadStoreOpType::CpAsyncBulk);
+smem_tv->setMemoryType(MemoryType::Shared);
+smem_tv->circularBuffer(2); // 2-stage circular buffer
 
 // The fusion system automatically handles:
 // - TMA operations with circular buffering
@@ -348,7 +349,7 @@ for stage in range(num_iterations):
 
 #### **Cutlass Implementation**
 
-Cutlass provides circular buffering through its pipeline templates:
+Cutlass provides circular buffering through its pipeline templates and builder patterns:
 
 ```cpp
 // Define pipeline with circular buffering
@@ -384,21 +385,54 @@ for (int stage = 0; stage < num_stages; ++stage) {
 }
 ```
 
+**Builder Pattern Examples:**
+
+Cutlass provides pre-packaged strategies through its builder patterns, as seen in [`sm90_gemm_f16_f16_f16_tensor_op_f32_cluster_warpspecialized_pingpong_bias_elementwise.cu`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/test/unit/gemm/device/sm90_gemm_f16_f16_f16_tensor_op_f32_cluster_warpspecialized_pingpong_bias_elementwise.cu):
+
+```cpp
+// Example: Ping-pong GEMM with bias and activation fusion
+using CollectiveMainloop = typename cutlass::gemm::collective::CollectiveBuilder<
+    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+    cutlass::half_t, LayoutA, 8,
+    cutlass::half_t, LayoutB, 8,
+    float,
+    TileShape_MNK, ClusterShape_MNK,
+    cutlass::gemm::collective::StageCountAutoCarveout<...>,
+    cutlass::gemm::KernelTmaWarpSpecializedPingpong  // Built-in ping-pong strategy
+>::CollectiveOp;
+
+using FusionOperation = cutlass::epilogue::fusion::LinCombPerRowBiasEltActAux<
+    LayoutC, cutlass::epilogue::thread::ReLu, cutlass::half_t, float, cutlass::half_t, float>;
+
+using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
+    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+    TileShape_MNK, ClusterShape_MNK,
+    cutlass::epilogue::collective::EpilogueTileAuto,
+    float, float,
+    cutlass::half_t, LayoutC, 8,
+    cutlass::half_t, LayoutC, 8,
+    cutlass::epilogue::TmaWarpSpecialized,
+    FusionOperation
+>::CollectiveOp;
+```
+
 **Key Features:**
 - **Template-Based**: Circular buffering integrated with GEMM templates
+- **Builder Patterns**: Pre-packaged strategies for common use cases
 - **TMA Integration**: Direct support for TMA operations
 - **Performance Optimized**: Highly optimized for GEMM workloads
+- **Fusion Support**: Built-in bias and activation fusion patterns
 
 #### **Implementation Comparison**
 
 | Aspect | nvFuser | CUTE | CuTeDSL | Cutlass |
 |--------|---------|------|----------|---------|
-| **Abstraction Level** | High (Automatic) | Medium (Layout-based) | High (Python) | Medium (Template-based) |
+| **Abstraction Level** | High (Automatic) | Medium (Layout-based) | Medium (Manual sync) | High (Builder patterns) |
 | **TMA Integration** | Direct | Direct | Direct | Direct |
 | **Memory Management** | Automatic | Manual | Semi-automatic | Manual |
-| **Synchronization** | Automatic | Manual | Semi-automatic | Manual |
+| **Synchronization** | Automatic | Manual | Manual | Manual |
 | **Performance** | Optimized | Optimized | Good | Highly Optimized |
-| **Ease of Use** | Easiest | Medium | Easy | Medium |
+| **Ease of Use** | Easiest | Medium | Medium | Easy |
 
 #### **Best Practices**
 
