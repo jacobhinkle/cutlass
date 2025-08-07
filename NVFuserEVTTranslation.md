@@ -15,6 +15,7 @@
    - 4.2 [Custom Operation Translation](#42-custom-operation-translation)
      - 4.2.1 [Composable EVT Node Approach](#421-composable-evt-node-approach)
    - 4.3 [Multiple Aux Inputs and Outputs Example](#43-multiple-aux-inputs-and-outputs-example)
+   - 4.4 [nvFP4 Block Scaling Example](#44-nvfp4-block-scaling-example)
 5. [Fusion Operation Mapping](#5-fusion-operation-mapping)
    - 5.1 [nvFuser to EVT Translation Rules](#51-nvfuser-to-evt-translation-rules)
    - 5.2 [Memory Layout Translation](#52-memory-layout-translation)
@@ -548,6 +549,203 @@ graph TD
     style B fill:#fff3e0
     style G fill:#fff3e0
     style I fill:#fff3e0
+```
+
+### 4.4 nvFP4 Block Scaling Example
+
+Block scaling is a Blackwell-specific feature that generates scale factors for narrow precision formats like nvFP4. This is particularly useful for quantization-aware training and inference where dynamic scaling is needed to maintain numerical precision.
+
+**nvFuser Pattern with Block Scaling:**
+```cpp
+// nvFuser fusion operation with nvFP4 block scaling
+TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::BFloat16);
+TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16);
+fusion->addInput(A);
+fusion->addInput(B);
+TensorView* acc = fusedMultiplySum(A, B, {-1});
+// Epilogue with block scaling: output = block_scale * (alpha * acc + beta * C)
+Val* alpha = IrBuilder::create<Val>(DataType::Float);
+Val* beta = IrBuilder::create<Val>(DataType::Float);
+fusion->addInput(alpha);
+fusion->addInput(beta);
+// Block scaling operation for nvFP4 quantization
+TensorView* alpha_acc = mul(alpha, acc);
+TensorView* beta_C = mul(beta, C);
+TensorView* linear_comb = add(alpha_acc, beta_C);
+TensorView* scaled_output = mul(block_scale, linear_comb);
+TensorView* output_fp4 = castOp(DataType::FP4, scaled_output);
+fusion->addOutput(output_fp4);
+```
+
+**nvFuser Fusion Flow:**
+```mermaid
+graph TD
+    A[A Tensor] --> E[fusedMultiplySum]
+    B[B Tensor] --> E
+    E --> F[Matmul Accumulator]
+    
+    subgraph Epilogue ["Epilogue with Block Scaling"]
+        G[Alpha Scalar] --> H[mul]
+        F --> H
+        H --> I[alpha * acc]
+        J[Beta Scalar] --> K[mul]
+        L[C Tensor] --> K
+        K --> M[beta * C]
+        I --> N[add]
+        M --> N
+        N --> O[alpha * acc + beta * C]
+        P[Block Scale] --> Q[mul]
+        O --> Q
+        Q --> R[scaled_output]
+        R --> S[castOp]
+    end
+    
+    S --> T[Final nvFP4 Output]
+    
+    style A fill:#e1f5fe
+    style B fill:#e1f5fe
+    style L fill:#e1f5fe
+    style G fill:#ffecb3
+    style J fill:#ffecb3
+    style P fill:#ff9800
+    style T fill:#c8e6c9
+    style Epilogue fill:#f3e5f5
+```
+
+**Generated SM100 Block Scaling EVT Code:**
+```cpp
+// SM100 block scaling EVT for nvFP4 quantization
+// This demonstrates the pattern from sm100_callbacks_tma_warpspecialized.hpp
+
+// 1. Define the block scaling EVT using SM100-specific nodes
+using BlockScalingEVT = cutlass::epilogue::fusion::Sm90EVT<
+    // Block scale factor generation and storage
+    cutlass::epilogue::fusion::Sm100BlockScaleFactorRowStore<
+        SFVecSize, EpilogueTile, ElementOutput, ElementCompute, 
+        ElementBlockScaleFactor, RoundStyle>,
+    
+    // Linear combination with block scaling
+    cutlass::epilogue::fusion::Sm90LinearCombination<
+        ElementCompute, ElementCompute, ElementSource, ElementScalar, RoundStyle>
+>;
+
+// 2. Define the fusion callback specialization
+template <
+    int StagesC, int StagesD, int FragmentSize,
+    bool ReuseSmemC, bool DelayTmaStore,
+    class ElementOutput, class ElementCompute, class ElementBlockScaleFactor,
+    int SFVecSize, class ElementSource, class ElementScalar,
+    FloatRoundStyle RoundStyle, class CtaTileShapeMNK, class EpilogueTile
+>
+struct FusionCallbacks<
+    epilogue::Sm100TmaWarpSpecialized<StagesC, StagesD, FragmentSize, ReuseSmemC, DelayTmaStore>,
+    fusion::LinCombBlockScaleFactor<SFVecSize, ElementOutput, ElementCompute, ElementBlockScaleFactor, 
+                                   cutlass::layout::RowMajor, ElementSource, ElementScalar, RoundStyle>,
+    CtaTileShapeMNK, EpilogueTile
+> : BlockScalingEVT {
+
+    struct Arguments {
+        ElementScalar alpha = ElementScalar(1);
+        ElementScalar beta = ElementScalar(0);
+        ElementScalar const* alpha_ptr = nullptr;
+        ElementScalar const* beta_ptr = nullptr;
+        ElementBlockScaleFactor* block_scale_factor_ptr = nullptr;
+        
+        // Matrix-wide normalization constant to avoid small FP4 values
+        ElementCompute const* norm_constant_ptr = nullptr;
+        using StrideNormConst = Stride<_0,_0,int64_t>;
+        StrideNormConst dNormConst = {_0{}, _0{}, 0};
+
+        // Stride definitions for alpha and beta
+        using StrideAlpha = Stride<_0,_0,int64_t>;
+        using StrideBeta = Stride<_0,_0,int64_t>;
+        StrideAlpha dAlpha = {_0{}, _0{}, 0};
+        StrideBeta dBeta = {_0{}, _0{}, 0};
+
+        operator typename BlockScalingEVT::Arguments() const {
+            return {
+                {
+                    // EVT structure: beta * C + (alpha * acc)
+                    {{beta}, {beta_ptr}, {dBeta}},     // beta scalar
+                    {},                                 // C tensor
+                    {                                   // nested: alpha * acc
+                        {{alpha}, {alpha_ptr}, {dAlpha}}, // alpha scalar
+                        {},                             // acc
+                        {}                              // multiplies args
+                    },                                  // end nested
+                    {}                                  // multiply_add args
+                },
+                // Block scaling arguments
+                {block_scale_factor_ptr, norm_constant_ptr, dNormConst}
+            };
+        }
+    };
+
+    using BlockScalingEVT::BlockScalingEVT;
+};
+```
+
+**Block Scaling EVT Flow:**
+```mermaid
+graph TD
+    A[Matmul Accumulator] --> B[Sm90AccFetch]
+    C[Alpha Scalar] --> D[Sm90ScalarBroadcast]
+    D --> E[Sm90Compute multiplies]
+    B --> E
+    E --> F[alpha * acc]
+    G[Beta Scalar] --> H[Sm90ScalarBroadcast]
+    H --> I[Sm90Compute multiply_add]
+    J[C Tensor] --> K[Sm90SrcFetch]
+    K --> I
+    F --> I
+    I --> L[beta * C + alpha * acc]
+    L --> M[Sm100BlockScaleFactorRowStore]
+    M --> N[Block Scaled Output]
+    
+    style A fill:#e1f5fe
+    style C fill:#ffecb3
+    style G fill:#ffecb3
+    style J fill:#e1f5fe
+    style N fill:#c8e6c9
+    style B fill:#fff3e0
+    style D fill:#fff3e0
+    style E fill:#fff3e0
+    style H fill:#fff3e0
+    style I fill:#fff3e0
+    style K fill:#fff3e0
+    style M fill:#ff9800
+```
+
+**Key Features of Block Scaling:**
+
+1. **SM100-Specific Nodes**: Uses `Sm100BlockScaleFactorRowStore` for Blackwell-specific block scaling
+2. **Normalization Constant**: Includes `norm_constant_ptr` to avoid generating small FP4 values
+3. **Vector Size Control**: `SFVecSize` parameter controls the vectorization of scale factor generation
+4. **Layout Flexibility**: Supports both row-major and column-major block scaling patterns
+5. **Quantization Ready**: Designed specifically for nvFP4 and other narrow precision formats
+
+**Usage in nvFuser Translation:**
+```cpp
+// Generated nvFuser to EVT translation for block scaling
+class BlockScalingTranslator {
+public:
+    static auto translate_block_scaling(
+        const nvFuser::Fusion& fusion,
+        const std::vector<nvFuser::TensorView*>& inputs) {
+        
+        // Extract block scaling parameters from nvFuser fusion
+        auto block_scale_tv = fusion.getInput("block_scale");
+        auto norm_const_tv = fusion.getInput("norm_constant");
+        
+        // Generate SM100 block scaling EVT
+        return BlockScalingEVT{
+            .alpha = fusion.getScalar("alpha"),
+            .beta = fusion.getScalar("beta"),
+            .block_scale_factor_ptr = block_scale_tv->data(),
+            .norm_constant_ptr = norm_const_tv->data()
+        };
+    }
+};
 ```
 
 ---
