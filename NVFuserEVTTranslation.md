@@ -694,6 +694,8 @@ struct FusionCallbacks<
         ElementBlockScaleFactor* block_scale_factor_ptr = nullptr;
         
         // Optional: normalization constant to avoid tiny nvFP4 values
+        // This matrix-wide scaling factor prevents loss of precision when converting
+        // small FP32 values to nvFP4 by scaling them up before quantization
         ElementCompute const* norm_constant_ptr = nullptr;
         using StrideNormConst = Stride<_0,_0,int64_t>;
         StrideNormConst dNormConst = {_0{}, _0{}, 0};
@@ -768,7 +770,7 @@ graph TD
 2. **Scale Factor Generation**: Epilogue generates scale factors when converting FP32 accumulator to nvFP4 output
 3. **Block-Wise Scaling**: Scale factors are generated per SFVecSize elements (typically 32 or 64)
 4. **Dual Output**: Produces both nvFP4 output tensor and corresponding scale factor tensor
-5. **Normalization Constant**: Optional matrix-wide constant to avoid generating tiny nvFP4 values
+5. **Normalization Constant**: Optional matrix-wide scaling factor to prevent loss of precision when converting small FP32 values to nvFP4 by scaling them up before quantization
 6. **Layout Flexibility**: Supports both row-major (Sm100BlockScaleFactorRowStore) and column-major (Sm100BlockScaleFactorColStore) layouts
 
 **Usage in nvFuser Translation:**
