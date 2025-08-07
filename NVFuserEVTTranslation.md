@@ -558,23 +558,38 @@ Block scaling is a Blackwell-specific feature that generates scale factors for n
 **nvFuser Pattern with Block Scaling:**
 ```cpp
 // nvFuser fusion operation with nvFP4 block scaling
+// All four tensors (operands + block scale factors) go to MMA
 TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::BFloat16);
 TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16);
+TensorView* A_scale = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::Float);
+TensorView* B_scale = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::Float);
 fusion->addInput(A);
 fusion->addInput(B);
-TensorView* acc = fusedMultiplySum(A, B, {-1});
-// Epilogue with block scaling: output = block_scale * (alpha * acc + beta * C)
+fusion->addInput(A_scale);
+fusion->addInput(B_scale);
+
+// Fused multiply-sum with all four tensors
+TensorView* acc = fusedMultiplySum(A, B, A_scale, B_scale, {-1});
+
+// Epilogue: compute max over blocks, divide by max, output both
 Val* alpha = IrBuilder::create<Val>(DataType::Float);
 Val* beta = IrBuilder::create<Val>(DataType::Float);
 fusion->addInput(alpha);
 fusion->addInput(beta);
-// Block scaling operation for nvFP4 quantization
+
+// Linear combination: alpha * acc + beta * C
 TensorView* alpha_acc = mul(alpha, acc);
 TensorView* beta_C = mul(beta, C);
 TensorView* linear_comb = add(alpha_acc, beta_C);
-TensorView* scaled_output = mul(block_scale, linear_comb);
-TensorView* output_fp4 = castOp(DataType::FP4, scaled_output);
+
+// Block-wise max computation and normalization
+TensorView* block_max = maxReduce(linear_comb, {0, 1}); // max over block dimensions
+TensorView* normalized_output = div(linear_comb, block_max);
+TensorView* output_fp4 = castOp(DataType::FP4, normalized_output);
+
+// Output both the normalized result and the block maxima
 fusion->addOutput(output_fp4);
+fusion->addOutput(block_max);
 ```
 
 **nvFuser Fusion Flow:**
@@ -582,9 +597,11 @@ fusion->addOutput(output_fp4);
 graph TD
     A[A Tensor] --> E[fusedMultiplySum]
     B[B Tensor] --> E
-    E --> F[Matmul Accumulator]
+    C[A_scale Tensor] --> E
+    D[B_scale Tensor] --> E
+    E --> F[Matmul Accumulator with Block Scaling]
     
-    subgraph Epilogue ["Epilogue with Block Scaling"]
+    subgraph Epilogue ["Epilogue with Block Max and Normalization"]
         G[Alpha Scalar] --> H[mul]
         F --> H
         H --> I[alpha * acc]
@@ -594,39 +611,71 @@ graph TD
         I --> N[add]
         M --> N
         N --> O[alpha * acc + beta * C]
-        P[Block Scale] --> Q[mul]
-        O --> Q
-        Q --> R[scaled_output]
-        R --> S[castOp]
+        O --> P[maxReduce]
+        P --> Q[block_max]
+        O --> R[div]
+        Q --> R
+        R --> S[normalized_output]
+        S --> T[castOp]
     end
     
-    S --> T[Final nvFP4 Output]
+    T --> U[Final nvFP4 Output]
+    Q --> V[Block Maxima Output]
     
     style A fill:#e1f5fe
     style B fill:#e1f5fe
+    style C fill:#e1f5fe
+    style D fill:#e1f5fe
     style L fill:#e1f5fe
     style G fill:#ffecb3
     style J fill:#ffecb3
-    style P fill:#ff9800
-    style T fill:#c8e6c9
+    style Q fill:#ff9800
+    style U fill:#c8e6c9
+    style V fill:#c8e6c9
     style Epilogue fill:#f3e5f5
 ```
 
 **Generated SM100 Block Scaling EVT Code:**
 ```cpp
-// SM100 block scaling EVT for nvFP4 quantization
+// SM100 block scaling EVT for nvFP4 quantization with block max and normalization
 // This demonstrates the pattern from sm100_callbacks_tma_warpspecialized.hpp
 
-// 1. Define the block scaling EVT using SM100-specific nodes
+// 1. Define the block scaling EVT with dual outputs (normalized result + block max)
 using BlockScalingEVT = cutlass::epilogue::fusion::Sm90EVT<
-    // Block scale factor generation and storage
-    cutlass::epilogue::fusion::Sm100BlockScaleFactorRowStore<
-        SFVecSize, EpilogueTile, ElementOutput, ElementCompute, 
-        ElementBlockScaleFactor, RoundStyle>,
+    // Dual output: normalized result and block maxima
+    cutlass::epilogue::fusion::Sm90EVT<
+        // First output: normalized result
+        cutlass::epilogue::fusion::Sm90Compute<
+            cutlass::divides, ElementOutput, ElementCompute, RoundStyle>,
+        
+        // Linear combination: alpha * acc + beta * C
+        cutlass::epilogue::fusion::Sm90EVT<
+            cutlass::epilogue::fusion::Sm90Compute<
+                cutlass::homogeneous_multiply_add, ElementCompute, ElementCompute, RoundStyle>,
+            cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // beta
+            cutlass::epilogue::fusion::Sm90SrcFetch<ElementC>, // C
+            cutlass::epilogue::fusion::Sm90EVT<
+                cutlass::epilogue::fusion::Sm90Compute<
+                    cutlass::multiplies, ElementCompute, ElementCompute, RoundStyle>,
+                cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // alpha
+                cutlass::epilogue::fusion::Sm90AccFetch // acc
+            >
+        >,
+        
+        // Block max for normalization
+        cutlass::epilogue::fusion::Sm90ScalarReduction<
+            cutlass::epilogue::thread::Max,
+            cutlass::epilogue::thread::AtomicMax,
+            ElementCompute, ElementCompute
+        >
+    >,
     
-    // Linear combination with block scaling
-    cutlass::epilogue::fusion::Sm90LinearCombination<
-        ElementCompute, ElementCompute, ElementSource, ElementScalar, RoundStyle>
+    // Second output: block maxima
+    cutlass::epilogue::fusion::Sm90ScalarReduction<
+        cutlass::epilogue::thread::Max,
+        cutlass::epilogue::thread::AtomicMax,
+        ElementBlockScaleFactor, ElementCompute
+    >
 >;
 
 // 2. Define the fusion callback specialization
@@ -649,12 +698,11 @@ struct FusionCallbacks<
         ElementScalar beta = ElementScalar(0);
         ElementScalar const* alpha_ptr = nullptr;
         ElementScalar const* beta_ptr = nullptr;
-        ElementBlockScaleFactor* block_scale_factor_ptr = nullptr;
         
-        // Matrix-wide normalization constant to avoid small FP4 values
-        ElementCompute const* norm_constant_ptr = nullptr;
-        using StrideNormConst = Stride<_0,_0,int64_t>;
-        StrideNormConst dNormConst = {_0{}, _0{}, 0};
+        // Block max output tensor
+        ElementBlockScaleFactor* block_max_ptr = nullptr;
+        using StrideBlockMax = Stride<_1,_0,int64_t>;
+        StrideBlockMax dBlockMax = {};
 
         // Stride definitions for alpha and beta
         using StrideAlpha = Stride<_0,_0,int64_t>;
@@ -665,18 +713,27 @@ struct FusionCallbacks<
         operator typename BlockScalingEVT::Arguments() const {
             return {
                 {
-                    // EVT structure: beta * C + (alpha * acc)
-                    {{beta}, {beta_ptr}, {dBeta}},     // beta scalar
-                    {},                                 // C tensor
-                    {                                   // nested: alpha * acc
-                        {{alpha}, {alpha_ptr}, {dAlpha}}, // alpha scalar
-                        {},                             // acc
-                        {}                              // multiplies args
-                    },                                  // end nested
-                    {}                                  // multiply_add args
+                    // First output: normalized result
+                    {
+                        // Division: result / block_max
+                        {
+                            // Linear combination: alpha * acc + beta * C
+                            {{beta}, {beta_ptr}, {dBeta}},     // beta scalar
+                            {},                                 // C tensor
+                            {                                   // nested: alpha * acc
+                                {{alpha}, {alpha_ptr}, {dAlpha}}, // alpha scalar
+                                {},                             // acc
+                                {}                              // multiplies args
+                            },                                  // end nested
+                            {}                                  // multiply_add args
+                        },
+                        // Block max for normalization (computed via reduction)
+                        {}
+                    },
+                    {} // division args
                 },
-                // Block scaling arguments
-                {block_scale_factor_ptr, norm_constant_ptr, dNormConst}
+                // Second output: block maxima
+                {block_max_ptr, ElementBlockScaleFactor(0), dBlockMax}
             };
         }
     };
@@ -688,7 +745,7 @@ struct FusionCallbacks<
 **Block Scaling EVT Flow:**
 ```mermaid
 graph TD
-    A[Matmul Accumulator] --> B[Sm90AccFetch]
+    A[Matmul Accumulator with Block Scaling] --> B[Sm90AccFetch]
     C[Alpha Scalar] --> D[Sm90ScalarBroadcast]
     D --> E[Sm90Compute multiplies]
     B --> E
@@ -699,14 +756,19 @@ graph TD
     K --> I
     F --> I
     I --> L[beta * C + alpha * acc]
-    L --> M[Sm100BlockScaleFactorRowStore]
-    M --> N[Block Scaled Output]
+    L --> M[Sm90ScalarReduction Max]
+    M --> N[block_max]
+    L --> O[Sm90Compute divides]
+    N --> O
+    O --> P[Normalized Output]
+    N --> Q[Block Maxima Output]
     
     style A fill:#e1f5fe
     style C fill:#ffecb3
     style G fill:#ffecb3
     style J fill:#e1f5fe
-    style N fill:#c8e6c9
+    style P fill:#c8e6c9
+    style Q fill:#c8e6c9
     style B fill:#fff3e0
     style D fill:#fff3e0
     style E fill:#fff3e0
@@ -714,15 +776,17 @@ graph TD
     style I fill:#fff3e0
     style K fill:#fff3e0
     style M fill:#ff9800
+    style O fill:#fff3e0
 ```
 
 **Key Features of Block Scaling:**
 
-1. **SM100-Specific Nodes**: Uses `Sm100BlockScaleFactorRowStore` for Blackwell-specific block scaling
-2. **Normalization Constant**: Includes `norm_constant_ptr` to avoid generating small FP4 values
-3. **Vector Size Control**: `SFVecSize` parameter controls the vectorization of scale factor generation
-4. **Layout Flexibility**: Supports both row-major and column-major block scaling patterns
+1. **Four-Tensor MMA**: All four tensors (operands + block scale factors) are fused into the MMA operation
+2. **Block-Wise Max Reduction**: Computes maximum over each block for normalization
+3. **Dual Output**: Produces both normalized result and block maxima
+4. **Division by Max**: Normalizes output by dividing by the computed block maximum
 5. **Quantization Ready**: Designed specifically for nvFP4 and other narrow precision formats
+6. **Layout Flexibility**: Supports both row-major and column-major block scaling patterns
 
 **Usage in nvFuser Translation:**
 ```cpp
@@ -734,15 +798,16 @@ public:
         const std::vector<nvFuser::TensorView*>& inputs) {
         
         // Extract block scaling parameters from nvFuser fusion
-        auto block_scale_tv = fusion.getInput("block_scale");
-        auto norm_const_tv = fusion.getInput("norm_constant");
+        auto A_scale_tv = fusion.getInput("A_scale");
+        auto B_scale_tv = fusion.getInput("B_scale");
+        auto block_max_tv = fusion.getOutput("block_max");
         
-        // Generate SM100 block scaling EVT
+        // Generate SM100 block scaling EVT with dual outputs
         return BlockScalingEVT{
             .alpha = fusion.getScalar("alpha"),
             .beta = fusion.getScalar("beta"),
-            .block_scale_factor_ptr = block_scale_tv->data(),
-            .norm_constant_ptr = norm_const_tv->data()
+            .block_max_ptr = block_max_tv->data(),
+            .dBlockMax = block_max_tv->getStride()
         };
     }
 };
