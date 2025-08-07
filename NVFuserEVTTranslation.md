@@ -553,25 +553,26 @@ graph TD
 
 ### 4.4 nvFP4 Block Scaling Example
 
-Block scaling is a Blackwell-specific feature that generates scale factors for narrow precision formats like nvFP4. This is particularly useful for quantization-aware training and inference where dynamic scaling is needed to maintain numerical precision.
+Block scaling is a Blackwell-specific feature that generates scale factors when converting outputs to narrow precision formats like nvFP4. This is particularly useful for quantization-aware training and inference where scale factors are needed to convert from higher precision accumulator values to lower precision storage formats.
 
 **nvFuser Pattern with Block Scaling:**
 ```cpp
-// nvFuser fusion operation with nvFP4 block scaling
-// All four tensors (operands + block scale factors) go to MMA
-TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::BFloat16);
-TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16);
-TensorView* A_scale = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::Float);
-TensorView* B_scale = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::Float);
+// nvFuser fusion operation with nvFP4 block scaling output
+// Input tensors may already be in narrow precision formats
+TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::NVFloat4);
+TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::NVFloat4);
+// Optional: Input scale factors if A/B are already block-scaled
+TensorView* A_scale = TensorViewBuilder().shape({-1/SFVecSize, 1, -1}).dtype(DataType::Float);
+TensorView* B_scale = TensorViewBuilder().shape({1, -1/SFVecSize, -1}).dtype(DataType::Float);
 fusion->addInput(A);
 fusion->addInput(B);
 fusion->addInput(A_scale);
 fusion->addInput(B_scale);
 
-// Fused multiply-sum with all four tensors
+// MMA operation with block-scaled inputs
 TensorView* acc = fusedMultiplySum(A, B, A_scale, B_scale, {-1});
 
-// Epilogue: compute max over blocks, divide by max, output both
+// Epilogue: linear combination followed by block scaling generation
 Val* alpha = IrBuilder::create<Val>(DataType::Float);
 Val* beta = IrBuilder::create<Val>(DataType::Float);
 fusion->addInput(alpha);
@@ -582,26 +583,26 @@ TensorView* alpha_acc = mul(alpha, acc);
 TensorView* beta_C = mul(beta, C);
 TensorView* linear_comb = add(alpha_acc, beta_C);
 
-// Block-wise max computation and normalization
-TensorView* block_max = maxReduce(linear_comb, {0, 1}); // max over block dimensions
-TensorView* normalized_output = div(linear_comb, block_max);
-TensorView* output_fp4 = castOp(DataType::FP4, normalized_output);
+// Generate block scale factors for nvFP4 output
+// Block scale factors are generated per SFVecSize elements
+TensorView* output_fp4 = castOp(DataType::NVFloat4, linear_comb);
+TensorView* output_scale = generateBlockScaleFactor(linear_comb, SFVecSize);
 
-// Output both the normalized result and the block maxima
+// Output both the nvFP4 result and the generated scale factors
 fusion->addOutput(output_fp4);
-fusion->addOutput(block_max);
+fusion->addOutput(output_scale);
 ```
 
 **nvFuser Fusion Flow:**
 ```mermaid
 graph TD
-    A[A Tensor] --> E[fusedMultiplySum]
-    B[B Tensor] --> E
+    A[A Tensor nvFP4] --> E[fusedMultiplySum]
+    B[B Tensor nvFP4] --> E
     C[A_scale Tensor] --> E
     D[B_scale Tensor] --> E
-    E --> F[Matmul Accumulator with Block Scaling]
+    E --> F[Matmul Accumulator FP32]
     
-    subgraph Epilogue ["Epilogue with Block Max and Normalization"]
+    subgraph Epilogue ["Epilogue with Block Scale Generation"]
         G[Alpha Scalar] --> H[mul]
         F --> H
         H --> I[alpha * acc]
@@ -610,71 +611,50 @@ graph TD
         K --> M[beta * C]
         I --> N[add]
         M --> N
-        N --> O[alpha * acc + beta * C]
-        O --> P[maxReduce]
-        P --> Q[block_max]
-        O --> R[div]
-        Q --> R
-        R --> S[normalized_output]
-        S --> T[castOp]
+        N --> O[linear_comb FP32]
+        O --> P[castOp nvFP4]
+        O --> Q[generateBlockScaleFactor]
     end
     
-    T --> U[Final nvFP4 Output]
-    Q --> V[Block Maxima Output]
+    P --> R[Output nvFP4]
+    Q --> S[Output Scale Factors]
     
     style A fill:#e1f5fe
     style B fill:#e1f5fe
-    style C fill:#e1f5fe
-    style D fill:#e1f5fe
+    style C fill:#ffe0b2
+    style D fill:#ffe0b2
     style L fill:#e1f5fe
     style G fill:#ffecb3
     style J fill:#ffecb3
-    style Q fill:#ff9800
-    style U fill:#c8e6c9
-    style V fill:#c8e6c9
+    style R fill:#c8e6c9
+    style S fill:#c8e6c9
     style Epilogue fill:#f3e5f5
 ```
 
 **Generated SM100 Block Scaling EVT Code:**
 ```cpp
-// SM100 block scaling EVT for nvFP4 quantization with block max and normalization
-// This demonstrates the pattern from sm100_callbacks_tma_warpspecialized.hpp
+// SM100 block scaling EVT for nvFP4 output generation
+// Based on the pattern from sm100_callbacks_tma_warpspecialized.hpp
 
-// 1. Define the block scaling EVT with dual outputs (normalized result + block max)
+// 1. Define the block scaling EVT using LinCombBlockScaleFactor
+// This operation performs linear combination and generates scale factors for nvFP4 output
 using BlockScalingEVT = cutlass::epilogue::fusion::Sm90EVT<
-    // Dual output: normalized result and block maxima
-    cutlass::epilogue::fusion::Sm90EVT<
-        // First output: normalized result
-        cutlass::epilogue::fusion::Sm90Compute<
-            cutlass::divides, ElementOutput, ElementCompute, RoundStyle>,
-        
-        // Linear combination: alpha * acc + beta * C
-        cutlass::epilogue::fusion::Sm90EVT<
-            cutlass::epilogue::fusion::Sm90Compute<
-                cutlass::homogeneous_multiply_add, ElementCompute, ElementCompute, RoundStyle>,
-            cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // beta
-            cutlass::epilogue::fusion::Sm90SrcFetch<ElementC>, // C
-            cutlass::epilogue::fusion::Sm90EVT<
-                cutlass::epilogue::fusion::Sm90Compute<
-                    cutlass::multiplies, ElementCompute, ElementCompute, RoundStyle>,
-                cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // alpha
-                cutlass::epilogue::fusion::Sm90AccFetch // acc
-            >
-        >,
-        
-        // Block max for normalization
-        cutlass::epilogue::fusion::Sm90ScalarReduction<
-            cutlass::epilogue::thread::Max,
-            cutlass::epilogue::thread::AtomicMax,
-            ElementCompute, ElementCompute
-        >
+    // Block scale factor generation for row-major output
+    cutlass::epilogue::fusion::Sm100BlockScaleFactorRowStore<
+        SFVecSize,                // Scale factor vector size (32 or 64)
+        EpilogueTile,             // Epilogue tile shape
+        ElementOutput,            // Output element type (nvFP4)
+        ElementCompute,           // Compute element type (float)
+        ElementBlockScaleFactor,  // Scale factor element type (float)
+        RoundStyle                // Rounding style
     >,
-    
-    // Second output: block maxima
-    cutlass::epilogue::fusion::Sm90ScalarReduction<
-        cutlass::epilogue::thread::Max,
-        cutlass::epilogue::thread::AtomicMax,
-        ElementBlockScaleFactor, ElementCompute
+    // Linear combination: alpha * acc + beta * C
+    cutlass::epilogue::fusion::Sm90LinearCombination<
+        ElementCompute,           // Output of this stage
+        ElementCompute,           // Accumulator type
+        ElementSource,            // Source type (C matrix)
+        ElementScalar,            // Scalar type (alpha/beta)
+        RoundStyle                // Rounding style
     >
 >;
 
@@ -688,10 +668,21 @@ template <
 >
 struct FusionCallbacks<
     epilogue::Sm100TmaWarpSpecialized<StagesC, StagesD, FragmentSize, ReuseSmemC, DelayTmaStore>,
-    fusion::LinCombBlockScaleFactor<SFVecSize, ElementOutput, ElementCompute, ElementBlockScaleFactor, 
-                                   cutlass::layout::RowMajor, ElementSource, ElementScalar, RoundStyle>,
+    fusion::LinCombBlockScaleFactor<
+        SFVecSize, ElementOutput, ElementCompute, ElementBlockScaleFactor, 
+        cutlass::layout::RowMajor, ElementSource, ElementScalar, RoundStyle>,
     CtaTileShapeMNK, EpilogueTile
-> : BlockScalingEVT {
+> : Sm100LinearCombRowBlockScaleFactor<
+        SFVecSize, EpilogueTile, 
+        typename cutlass::detail::get_unpacked_element_type<ElementOutput>::type, 
+        ElementCompute, ElementBlockScaleFactor, ElementSource, 
+        ElementScalar, RoundStyle> {
+
+    using Impl = Sm100LinearCombRowBlockScaleFactor<
+        SFVecSize, EpilogueTile, 
+        typename cutlass::detail::get_unpacked_element_type<ElementOutput>::type, 
+        ElementCompute, ElementBlockScaleFactor, ElementSource, 
+        ElementScalar, RoundStyle>;
 
     struct Arguments {
         ElementScalar alpha = ElementScalar(1);
@@ -699,53 +690,47 @@ struct FusionCallbacks<
         ElementScalar const* alpha_ptr = nullptr;
         ElementScalar const* beta_ptr = nullptr;
         
-        // Block max output tensor
-        ElementBlockScaleFactor* block_max_ptr = nullptr;
-        using StrideBlockMax = Stride<_1,_0,int64_t>;
-        StrideBlockMax dBlockMax = {};
+        // Block scale factor output pointer
+        ElementBlockScaleFactor* block_scale_factor_ptr = nullptr;
+        
+        // Optional: normalization constant to avoid tiny nvFP4 values
+        ElementCompute const* norm_constant_ptr = nullptr;
+        using StrideNormConst = Stride<_0,_0,int64_t>;
+        StrideNormConst dNormConst = {_0{}, _0{}, 0};
 
-        // Stride definitions for alpha and beta
+        // Stride definitions for alpha and beta (scalars)
         using StrideAlpha = Stride<_0,_0,int64_t>;
         using StrideBeta = Stride<_0,_0,int64_t>;
         StrideAlpha dAlpha = {_0{}, _0{}, 0};
         StrideBeta dBeta = {_0{}, _0{}, 0};
 
-        operator typename BlockScalingEVT::Arguments() const {
+        operator typename Impl::Arguments() const {
             return {
-                {
-                    // First output: normalized result
-                    {
-                        // Division: result / block_max
-                        {
-                            // Linear combination: alpha * acc + beta * C
-                            {{beta}, {beta_ptr}, {dBeta}},     // beta scalar
-                            {},                                 // C tensor
-                            {                                   // nested: alpha * acc
-                                {{alpha}, {alpha_ptr}, {dAlpha}}, // alpha scalar
-                                {},                             // acc
-                                {}                              // multiplies args
-                            },                                  // end nested
-                            {}                                  // multiply_add args
-                        },
-                        // Block max for normalization (computed via reduction)
-                        {}
+                {   // Linear combination arguments
+                    // Ternary operation: beta * C + (alpha * acc)
+                    {{beta}, {beta_ptr}, {dBeta}},       // beta scalar
+                    {},                                   // C tensor
+                    {                                     // Binary operation: alpha * acc
+                        {{alpha}, {alpha_ptr}, {dAlpha}}, // alpha scalar
+                        {},                               // accumulator
+                        {}                                // multiplies args
                     },
-                    {} // division args
+                    {}                                    // multiply_add args
                 },
-                // Second output: block maxima
-                {block_max_ptr, ElementBlockScaleFactor(0), dBlockMax}
+                // Block scale factor generation arguments
+                {block_scale_factor_ptr, norm_constant_ptr, dNormConst}
             };
         }
     };
 
-    using BlockScalingEVT::BlockScalingEVT;
+    using Impl::Impl;
 };
 ```
 
 **Block Scaling EVT Flow:**
 ```mermaid
 graph TD
-    A[Matmul Accumulator with Block Scaling] --> B[Sm90AccFetch]
+    A[Matmul Accumulator FP32] --> B[Sm90AccFetch]
     C[Alpha Scalar] --> D[Sm90ScalarBroadcast]
     D --> E[Sm90Compute multiplies]
     B --> E
@@ -755,59 +740,87 @@ graph TD
     J[C Tensor] --> K[Sm90SrcFetch]
     K --> I
     F --> I
-    I --> L[beta * C + alpha * acc]
-    L --> M[Sm90ScalarReduction Max]
-    M --> N[block_max]
-    L --> O[Sm90Compute divides]
-    N --> O
-    O --> P[Normalized Output]
-    N --> Q[Block Maxima Output]
+    I --> L[Linear Combination FP32]
+    L --> M[Sm100BlockScaleFactorRowStore]
+    M --> N[nvFP4 Output]
+    M --> O[Scale Factor Output]
+    P[Norm Constant] --> M
     
     style A fill:#e1f5fe
     style C fill:#ffecb3
     style G fill:#ffecb3
     style J fill:#e1f5fe
-    style P fill:#c8e6c9
-    style Q fill:#c8e6c9
+    style P fill:#ffecb3
+    style N fill:#c8e6c9
+    style O fill:#c8e6c9
     style B fill:#fff3e0
     style D fill:#fff3e0
     style E fill:#fff3e0
     style H fill:#fff3e0
     style I fill:#fff3e0
     style K fill:#fff3e0
-    style M fill:#ff9800
-    style O fill:#fff3e0
+    style M fill:#ffd54f
 ```
 
 **Key Features of Block Scaling:**
 
-1. **Four-Tensor MMA**: All four tensors (operands + block scale factors) are fused into the MMA operation
-2. **Block-Wise Max Reduction**: Computes maximum over each block for normalization
-3. **Dual Output**: Produces both normalized result and block maxima
-4. **Division by Max**: Normalizes output by dividing by the computed block maximum
-5. **Quantization Ready**: Designed specifically for nvFP4 and other narrow precision formats
-6. **Layout Flexibility**: Supports both row-major and column-major block scaling patterns
+1. **Mainloop Integration**: Input scale factors (if present) are handled in the MMA mainloop, not the epilogue
+2. **Scale Factor Generation**: Epilogue generates scale factors when converting FP32 accumulator to nvFP4 output
+3. **Block-Wise Scaling**: Scale factors are generated per SFVecSize elements (typically 32 or 64)
+4. **Dual Output**: Produces both nvFP4 output tensor and corresponding scale factor tensor
+5. **Normalization Constant**: Optional matrix-wide constant to avoid generating tiny nvFP4 values
+6. **Layout Flexibility**: Supports both row-major (Sm100BlockScaleFactorRowStore) and column-major (Sm100BlockScaleFactorColStore) layouts
 
 **Usage in nvFuser Translation:**
 ```cpp
 // Generated nvFuser to EVT translation for block scaling
 class BlockScalingTranslator {
 public:
-    static auto translate_block_scaling(
+    static auto translate_block_scaling_epilogue(
         const nvFuser::Fusion& fusion,
-        const std::vector<nvFuser::TensorView*>& inputs) {
+        const std::vector<nvFuser::TensorView*>& outputs) {
         
-        // Extract block scaling parameters from nvFuser fusion
-        auto A_scale_tv = fusion.getInput("A_scale");
-        auto B_scale_tv = fusion.getInput("B_scale");
-        auto block_max_tv = fusion.getOutput("block_max");
+        // Identify block scaling pattern in epilogue
+        auto linear_comb = fusion.getEpilogueOperation();
+        auto scale_output = fusion.getScaleFactorOutput();
         
-        // Generate SM100 block scaling EVT with dual outputs
-        return BlockScalingEVT{
-            .alpha = fusion.getScalar("alpha"),
-            .beta = fusion.getScalar("beta"),
-            .block_max_ptr = block_max_tv->data(),
-            .dBlockMax = block_max_tv->getStride()
+        // Determine scale factor vector size based on output dimensions
+        constexpr int SFVecSize = 32; // or 64, based on architecture
+        
+        // Generate appropriate EVT based on layout
+        if (scale_output->isRowMajor()) {
+            return generate_row_major_block_scaling_evt<SFVecSize>(
+                fusion.getAlpha(),
+                fusion.getBeta(),
+                scale_output->data_ptr(),
+                fusion.getNormalizationConstant()
+            );
+        } else {
+            return generate_col_major_block_scaling_evt<SFVecSize>(
+                fusion.getAlpha(),
+                fusion.getBeta(),
+                scale_output->data_ptr(),
+                fusion.getNormalizationConstant()
+            );
+        }
+    }
+    
+private:
+    template<int SFVecSize>
+    static auto generate_row_major_block_scaling_evt(
+        float alpha, float beta, 
+        void* scale_factor_ptr,
+        float norm_constant) {
+        
+        using Operation = fusion::LinCombBlockScaleFactor<
+            SFVecSize, cutlass::nvfloat4_t, float, float,
+            cutlass::layout::RowMajor, float, float>;
+            
+        return typename Operation::Arguments{
+            .alpha = alpha,
+            .beta = beta,
+            .block_scale_factor_ptr = static_cast<float*>(scale_factor_ptr),
+            .norm_constant_ptr = &norm_constant
         };
     }
 };
