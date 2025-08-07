@@ -25,6 +25,7 @@ This document provides a comprehensive comparison of common features across four
    - [3.1 Parallelization and Execution](#31-parallelization-and-execution)
    - [3.2 Tensor Core MMA Operations](#32-tensor-core-mma-operations)
    - [3.3 Mathematical Operations](#33-mathematical-operations)
+   - [3.4 LdMatrix and StMatrix Operations](#34-ldmatrix-and-stmatrix-operations)
 
 4. [4. Circular Buffering and Syncing](#4-circular-buffering-and-syncing)
    - [4.1 Asynchronous Memory Operations](#41-asynchronous-memory-operations)
@@ -96,36 +97,36 @@ This comparison shows how these four interfaces provide different approaches to 
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Split Domain** | [`IterDomain::split()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L133) | [`logical_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1575) | Unknown | Layout operations via CUTE |
-| **Merge Domain** | [`IterDomain::merge()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L124) | [`flatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L530) | Unknown | Layout operations via CUTE |
-| **Reorder Domain** | [`TensorDomain::reorder()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L698) | [`composition()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1135) | Unknown | Layout operations via CUTE |
-| **Flatten Domain** | [`TensorDomain::flatten()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L719) | [`flatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L530) | Unknown | Layout operations via CUTE |
+| **Split Domain** | [`IterDomain::split()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L133) | [`logical_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1575) | [`logical_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L307) | Layout operations via CUTE |
+| **Merge Domain** | [`IterDomain::merge()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L124) | [`flatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L530) | [`flatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | Layout operations via CUTE |
+| **Reorder Domain** | [`TensorDomain::reorder()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L698) | [`composition()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1135) | [`composition()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L123) | Layout operations via CUTE |
+| **Flatten Domain** | [`TensorDomain::flatten()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L719) | [`flatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L530) | [`flatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | Layout operations via CUTE |
 
 ### 2.2 Advanced Layout Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Tile/Divide** | [`IterDomain::split()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L133) | [`zipped_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1625) | Unknown | Layout operations via CUTE |
-| **Composition** | Multiple transformations | [`composition()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1135) | Unknown | Layout operations via CUTE |
-| **Swizzle** | [`IterDomain::swizzle()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L355) | [`Swizzle` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/swizzle_layout.hpp#L71) | Unknown | Layout operations via CUTE |
-| **Resize/Expand** | [`IterDomain::resize()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L140) | [`composition()` with padding](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1135) | Unknown | Layout operations via CUTE |
+| **Tile/Divide** | [`IterDomain::split()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L133) | [`zipped_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1625) | [`zipped_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L1625) | Layout operations via CUTE |
+| **Composition** | Multiple transformations | [`composition()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1135) | [`composition()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L123) | Layout operations via CUTE |
+| **Swizzle** | [`IterDomain::swizzle()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L355) | [`Swizzle` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/swizzle_layout.hpp#L71) | [`make_swizzle()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L3434) | Layout operations via CUTE |
+| **Resize/Expand** | [`IterDomain::resize()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L140) | [`composition()` with padding](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1135) | [`composition()` with padding](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L123) | Layout operations via CUTE |
 
 ### 2.3 Memory Layout and Access Patterns
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Row-Major Layout** | Implicit in IterDomain | [`LayoutLeft`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L355) | Unknown | Layout operations via CUTE |
-| **Column-Major Layout** | Implicit in IterDomain | [`LayoutRight`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L363) | Unknown | Layout operations via CUTE |
-| **Stride Patterns** | [`IterDomain` stride info](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L82) | [`stride()` accessors](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L143) | Unknown | Layout operations via CUTE |
-| **Broadcast** | [`IterDomain::isBroadcast()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L175) | Zero-stride layouts | Unknown | Layout operations via CUTE |
+| **Row-Major Layout** | Implicit in IterDomain | [`LayoutLeft`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L355) | [`make_layout()` with default stride](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L3285) | Layout operations via CUTE |
+| **Column-Major Layout** | Implicit in IterDomain | [`LayoutRight`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L363) | [`make_layout()` with custom stride](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L3285) | Layout operations via CUTE |
+| **Stride Patterns** | [`IterDomain` stride info](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L82) | [`stride()` accessors](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L143) | [`stride` property](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L771) | Layout operations via CUTE |
+| **Broadcast** | [`IterDomain::isBroadcast()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L175) | Zero-stride layouts | Zero-stride layouts | Layout operations via CUTE |
 
 ### 2.4 Tensor Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Tensor Creation** | [`TensorView`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`make_tensor()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/tensor_impl.hpp#L566) | Unknown | [`TensorView`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/tensor_view.h#L128) |
-| **Tensor Slicing** | [`slice()` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L688) | [`slice()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L688) | Unknown | [`subview()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/tensor_view.h#L221) |
-| **Tensor Reshape** | Multiple transformations | [`unflatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L543) | Unknown | Layout operations via CUTE |
+| **Tensor Creation** | [`TensorView`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`make_tensor()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/tensor_impl.hpp#L566) | [`make_tensor()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L3723) | [`TensorView`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/tensor_view.h#L128) |
+| **Tensor Slicing** | [`slice()` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L688) | [`slice()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L688) | [`slice_()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | [`subview()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/tensor_view.h#L221) |
+| **Tensor Reshape** | Multiple transformations | [`unflatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L543) | [`unflatten()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | Layout operations via CUTE |
 
 ---
 
@@ -135,27 +136,155 @@ This comparison shows how these four interfaces provide different approaches to 
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Thread Mapping** | [`ParallelType`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L227) | [`make_layout()` thread layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L335) | Unknown | GEMM kernel mapping |
-| **Block Mapping** | [`isBlockDim()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L200) | [`blocked_product()` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1749) | Unknown | GEMM kernel mapping |
-| **Grid Mapping** | [`isThreadDim()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L205) | [`domain_distribute()` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1448) | Unknown | GEMM kernel mapping |
+| **Thread Mapping** | [`ParallelType`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L227) | [`make_layout()` thread layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L335) | [`make_layout()` thread layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L3285) | GEMM kernel mapping |
+| **Block Mapping** | [`isBlockDim()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L200) | [`blocked_product()` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1749) | [`blocked_product()` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | GEMM kernel mapping |
+| **Grid Mapping** | [`isThreadDim()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L205) | [`domain_distribute()` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1448) | [`domain_distribute()` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | GEMM kernel mapping |
 
 ### 3.2 Tensor Core MMA Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **MMA Instructions** | [`isMma()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L344) | [`mma_atom`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/mma_atom.hpp#L257) | Unknown | [`Mma` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
-| **Tensor Core Layouts** | Instruction loops | [`mma_traits`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/mma_traits_sm90_gmma.hpp#L241) | Unknown | [`Mma` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
-| **MMA Swizzling** | [`SwizzleType`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L355) | [`Swizzle` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/swizzle_layout.hpp#L71) | Unknown | [`Mma` swizzle](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
-| **Tensor Core Tiling** | [`IterDomain::split()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L133) | [`logical_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1575) | Unknown | [`Mma` tiling](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
+| **MMA Instructions** | [`isMma()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L344) | [`mma_atom`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/mma_atom.hpp#L257) | [`make_mma_atom()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | [`Mma` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
+| **Tensor Core Layouts** | Instruction loops | [`mma_traits`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/mma_traits_sm90_gmma.hpp#L241) | [`make_tiled_mma()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | [`Mma` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
+| **MMA Swizzling** | [`SwizzleType`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L355) | [`Swizzle` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/swizzle_layout.hpp#L71) | [`make_swizzle()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L3434) | [`Mma` swizzle](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
+| **Tensor Core Tiling** | [`IterDomain::split()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L133) | [`logical_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/layout.hpp#L1575) | [`logical_divide()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L307) | [`Mma` tiling](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
 
 ### 3.3 Mathematical Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Reduction** | [`IterType::Reduction`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L170) | Reduction layouts | Unknown | GEMM operations |
-| **Broadcast** | [`IterType::Broadcast`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L180) | Zero-stride layouts | Unknown | GEMM operations |
-| **Gather/Scatter** | [`IterType::GatherScatter`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L185) | Strided layouts | Unknown | GEMM operations |
+| **Reduction** | [`IterType::Reduction`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L170) | Reduction layouts | Reduction layouts | GEMM operations |
+| **Broadcast** | [`IterType::Broadcast`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L180) | Zero-stride layouts | Zero-stride layouts | GEMM operations |
+| **Gather/Scatter** | [`IterType::GatherScatter`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L180) | Strided layouts | Strided layouts | GEMM operations |
 
+### 3.4 LdMatrix and StMatrix Operations
+
+LdMatrix and StMatrix are warp-level instructions for loading and storing matrices between shared memory and registers. These operations are crucial for efficient data movement in Tensor Core operations and are supported across different GPU architectures.
+
+#### **3.4.1 LdMatrix (Load Matrix) Operations**
+
+| Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
+|---------|---------|------|----------|---------|
+| **LdMatrix Definition** | [`LoadStoreOpType::LdMatrix`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`SM100_U8x8_LDSM_T`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L47) | Via CUTE integration | Via CUTE integration |
+| **LdMatrix Detection** | [`isLdMatrixOp()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/utils.cpp#L133) | Layout-based detection | Layout-based detection | Via CUTE integration |
+| **LdMatrix Scheduling** | [`scheduleLdStMatrixRegisters()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/scheduler/mma_utils.cpp#L328) | [`Copy_Traits`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/copy_traits_sm100.hpp#L39) | [`Copy_Traits`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | Via CUTE integration |
+| **LdMatrix Indexing** | [`hardCodedSharedMemoryIndexForLdStMatrix()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/index.cpp#L1710) | Layout-based indexing | Layout-based indexing | Via CUTE integration |
+
+#### **3.4.2 StMatrix (Store Matrix) Operations**
+
+| Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
+|---------|---------|------|----------|---------|
+| **StMatrix Definition** | [`LoadStoreOpType::StMatrix`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`SM100_U8x4_STSM_T`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L247) | Via CUTE integration | Via CUTE integration |
+| **StMatrix Detection** | [`isStMatrixOp()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/utils.cpp#L139) | Layout-based detection | Layout-based detection | Via CUTE integration |
+| **StMatrix Scheduling** | [`scheduleLdStMatrixSharedMemory()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/scheduler/mma_utils.cpp#L1351) | [`Copy_Traits`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/copy_traits_sm100.hpp#L175) | [`Copy_Traits`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | Via CUTE integration |
+| **StMatrix Indexing** | [`hardCodedSharedMemoryIndexForLdStMatrix()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/index.cpp#L1710) | Layout-based indexing | Layout-based indexing | Via CUTE integration |
+
+#### **3.4.3 Architecture-Specific Implementations**
+
+| Architecture | nvFuser | CUTE | CuTeDSL | Cutlass |
+|--------------|---------|------|----------|---------|
+| **SM75 (Turing)** | [`LoadStoreOpType::LdMatrix`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`SM75_U32x1_LDSM_N`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm75.hpp#L67) | Unknown | Via CUTE integration |
+| **SM90 (Hopper)** | [`LoadStoreOpType::LdMatrix`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`SM100_U8x8_LDSM_T`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L47) | Unknown | Via CUTE integration |
+| **SM100 (Blackwell)** | [`LoadStoreOpType::LdMatrix`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`SM100_SU6_DU8x16_x4_LDSM_N`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L223) | Unknown | Via CUTE integration |
+
+#### **3.4.4 Matrix Shapes and Formats**
+
+| Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
+|---------|---------|------|----------|---------|
+| **8x8 Matrix** | Supported via scheduling | [`SM75_U32x1_LDSM_N`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm75.hpp#L67) | Unknown | Via CUTE integration |
+| **16x8 Matrix** | Supported via scheduling | [`SM100_U8x4_STSM_T`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L247) | Unknown | Via CUTE integration |
+| **16x16 Matrix** | Supported via scheduling | [`SM100_U8x8_LDSM_T`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L47) | Unknown | Via CUTE integration |
+| **8x16 Matrix** | Supported via scheduling | [`SM100_SU6_DU8x16_x4_LDSM_N`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L223) | Unknown | Via CUTE integration |
+
+#### **3.4.5 Data Type Support**
+
+| Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
+|---------|---------|------|----------|---------|
+| **16-bit Types (b16)** | Supported | [`SM75_U32x1_LDSM_N`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm75.hpp#L67) | Unknown | Via CUTE integration |
+| **8-bit Types (b8)** | Supported | [`SM100_U8x8_LDSM_T`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L47) | Unknown | Via CUTE integration |
+| **Format Conversion** | Automatic | [`SM100_SU6_DU8x16_x4_LDSM_N`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm100.hpp#L223) | Unknown | Via CUTE integration |
+
+#### **3.4.6 Implementation Examples**
+
+**nvFuser LdMatrix Implementation:**
+```cpp
+// Define LdMatrix operation
+TensorView* tv0_reg = tv0_smem->cacheAfter();
+tv0_reg->definition()->as<LoadStoreOp>()->setOpType(LoadStoreOpType::LdMatrix);
+
+// Schedule LdMatrix registers
+AbstractTensor tv0_reg_abstract_tensor = scheduleLdStMatrixRegisters(tv0_reg_base_tensor);
+tv0_reg->setLoopDomain(tv0_reg_abstract_tensor.as<IterDomain*>());
+
+// Parallelize for LdMatrix.x4
+tv0_reg->axis(-2)->parallelize(ParallelType::TIDx);
+tv0_reg->axis(-1)->parallelize(ParallelType::Vectorize);
+```
+
+**CUTE LdMatrix Implementation:**
+```cpp
+// Define LdMatrix copy atom
+using LdMatrixAtom = SM100_U8x8_LDSM_T;
+
+// Create copy operation
+auto ldmatrix_copy = make_tiled_copy(LdMatrixAtom{},
+                                    Layout<Shape<_32,_8>>{},  // Thread layout
+                                    Layout<Shape<_8,_8>>{});  // Value layout
+
+// Execute LdMatrix operation
+copy(ldmatrix_copy, smem_tensor, reg_tensor);
+```
+
+**Cutlass LdMatrix Integration:**
+```cpp
+// Cutlass integrates LdMatrix through CUTE
+using CollectiveMainloop = typename cutlass::gemm::collective::CollectiveBuilder<
+    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+    ElementA, LayoutA, 8,
+    ElementB, LayoutB, 8,
+    ElementAccumulator,
+    TileShape_MNK, ClusterShape_MNK,
+    cutlass::gemm::collective::StageCountAutoCarveout<...>,
+    cutlass::gemm::KernelTmaWarpSpecializedPingpong
+>::CollectiveOp;
+```
+
+#### **3.4.7 Key Differences in Implementation**
+
+| Aspect | nvFuser | CUTE | CuTeDSL | Cutlass |
+|--------|---------|------|----------|---------|
+| **Abstraction Level** | High (Automatic) | Low (Manual) | Unknown | Medium (Builder) |
+| **Scheduling** | Automatic via AbstractTensor | Manual layout design | Unknown | Via CUTE integration |
+| **Indexing** | Custom hard-coded indexing | Layout-based indexing | Unknown | Via CUTE integration |
+| **Architecture Support** | Runtime detection | Compile-time specialization | Unknown | Via CUTE integration |
+| **Performance** | Optimized | Highly optimized | Unknown | Optimized |
+| **Ease of Use** | Easy | Difficult | Unknown | Medium |
+
+#### **3.4.8 Integration with Other Operations**
+
+| Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
+|---------|---------|------|----------|---------|
+| **TMA Integration** | [`LoadStoreOpType::CpAsyncBulkTensorTile`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy_traits_sm90_tma`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/copy_traits_sm90_tma.hpp#L1368) | Unknown | Via CUTE integration |
+| **WGMMA Integration** | [`MmaOp`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`mma_atom`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/mma_atom.hpp#L257) | Unknown | Via CUTE integration |
+| **Swizzle Support** | [`MmaInputSmemSwizzle`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L355) | [`Swizzle` layouts](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/swizzle_layout.hpp#L71) | Unknown | Via CUTE integration |
+
+#### **3.4.9 Performance Considerations**
+
+| Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
+|---------|---------|------|----------|---------|
+| **Memory Bandwidth** | Optimized through fusion | Manual optimization | Unknown | Optimized |
+| **Register Usage** | Automatic management | Manual management | Unknown | Via CUTE integration |
+| **Instruction Throughput** | Compiler optimized | Manual optimization | Unknown | Optimized |
+| **Bank Conflict Avoidance** | Automatic | Manual layout design | Unknown | Via CUTE integration |
+
+#### **3.4.10 Best Practices**
+
+1. **Matrix Size Selection**: Choose appropriate matrix sizes (8x8, 16x8, 16x16) based on data type and architecture
+2. **Memory Alignment**: Ensure proper memory alignment for optimal performance
+3. **Swizzle Patterns**: Use appropriate swizzle patterns to avoid bank conflicts
+4. **Register Pressure**: Monitor register usage when using multiple LdMatrix/StMatrix operations
+5. **Architecture Compatibility**: Verify support for target GPU architecture
+6. **Integration**: Properly integrate with TMA and WGMMA operations for optimal data flow
 
 ---
 
@@ -165,8 +294,8 @@ This comparison shows how these four interfaces provide different approaches to 
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **TMA (Tensor Memory Accelerator)** | [`LoadStoreOpType::CpAsyncBulk`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy_traits_sm90_tma`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/copy_traits_sm90_tma.hpp#L1368) | Unknown | [`Tma` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
-| **Asynchronous Copy** | [`TensorView` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/algorithm/copy.hpp#L398) | Unknown | [`Copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
+| **TMA (Tensor Memory Accelerator)** | [`LoadStoreOpType::CpAsyncBulk`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy_traits_sm90_tma`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/atom/copy_traits_sm90_tma.hpp#L1368) | [`copy_traits_sm90_tma`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L45) | [`Tma` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
+| **Asynchronous Copy** | [`TensorView` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ir/internal_base_nodes.h#L415) | [`copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/algorithm/copy.hpp#L398) | [`copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/core.py#L5405) | [`Copy` operations](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/gemm/collective/sm90_sparse_mma_tma_gmma_ss_warpspecialized.hpp#L678) |
 
 ### 4.2 Mbarrier Operations
 
@@ -174,17 +303,17 @@ This comparison shows how these four interfaces provide different approaches to 
 |---------|---------|------|----------|---------|
 | **Mbarrier Initialization** | [`MBarrierInit`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1001) | [`mbarrier_init()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm90_desc.hpp#L55) | [`mbarrier_init()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L25) | [`initialize_barrier()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm90_desc.hpp#L55) |
 | **Mbarrier Arrive** | [`mbarrier::arrive()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/runtime/mbarrier.cu#L35) | [`mbarrier_arrive()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm90_desc.hpp#L89) | [`mbarrier_arrive()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L95) | [`cpasync_barrier_arrive()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/arch/barrier.h#L720) |
-| **Mbarrier Wait** | [`mbarrier::wait()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/runtime/mbarrier.cu#L75) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm90_desc.hpp#L89) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L160) | [`MbarrierArray::wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L245) |
-| **Mbarrier Invalidate** | [`MBarrierInvalidate`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1020) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/mbarrier.cu#L30) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L50) | [`MbarrierArray::arrive_and_drop()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L275) |
+| **Mbarrier Wait** | [`mbarrier::wait()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/runtime/mbarrier.cu#L75) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cute/arch/copy_sm90_desc.hpp#L89) | [`mbarrier_wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L160) | [`MbarrierArray::wait()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/pipeline/helpers.py#L245) |
+| **Mbarrier Invalidate** | [`MBarrierInvalidate`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1020) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/mbarrier.cu#L30) | [`mbarrier_inval()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/mbar.py#L50) | [`MbarrierArray::arrive_and_drop()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/pipeline/helpers.py#L275) |
 
 ### 4.3 Fence Operations
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Async Proxy Fence** | [`FenceAsyncProxy`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/insert_syncs.cpp#L59) | Layout operations | Unknown | [`fence_view_async_shared()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/arch/barrier.h#L705) |
-| **WgMma Fence** | [`WgMmaFence`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/insert_syncs.cpp#L59) | Layout operations | Unknown | [`fence_barrier_init()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/arch/barrier.h#L695) |
-| **Block Sync** | [`BlockSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4070) | Layout operations | Unknown | [`block_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/block_sync_default.cu#L25) |
-| **Grid Sync** | [`GridSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4090) | Layout operations | Unknown | [`grid_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/grid_sync.cu#L43) |
+| **Async Proxy Fence** | [`FenceAsyncProxy`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/insert_syncs.cpp#L59) | Layout operations | [`fence_proxy()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/barrier.py#L45) | [`fence_view_async_shared()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/arch/barrier.h#L705) |
+| **WgMma Fence** | [`WgMmaFence`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/insert_syncs.cpp#L59) | Layout operations | [`wgmma_fence()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/barrier.py#L45) | [`fence_barrier_init()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/arch/barrier.h#L695) |
+| **Block Sync** | [`BlockSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4070) | Layout operations | [`block_sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/barrier.py#L45) | [`block_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/block_sync_default.cu#L25) |
+| **Grid Sync** | [`GridSync`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/codegen.cpp#L4090) | Layout operations | [`grid_sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/cute/arch/barrier.py#L45) | [`grid_sync::sync()`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/runtime/grid_sync.cu#L43) |
 
 ### 4.4 Circular Buffer Management
 
@@ -192,7 +321,7 @@ This comparison shows how these four interfaces provide different approaches to 
 |---------|---------|------|----------|---------|
 | **Circular Buffer Stages** | [`CircularBufferInfo`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1514) | Layout operations | [`PipelineAsync`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/sm90.py#L38) | [`PipelineTmaAsync`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/pipeline/sm90_pipeline.hpp#L299) |
 | **Multi-Stage Buffering** | [`initializeCircularBufferMbarrier()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1514) | Layout operations | [`MbarrierArray`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L132) | [`PipelineTmaUmmaAsync`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/pipeline/sm100_pipeline.hpp#L471) |
-| **Ping-Pong Buffering** | [`HopperPingPongMbarriers`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1562) | Layout operations | Unknown | [`TmaStoreFence`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L376) |
+| **Ping-Pong Buffering** | [`HopperPingPongMbarriers`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/device_lower/pass/allocation.cpp#L1562) | Layout operations | [`PipelineAsync` with ping-pong](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/sm90.py#L38) | [`TmaStoreFence`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/CuTeDSL/cutlass/pipeline/helpers.py#L376) |
 
 ---
 
@@ -202,10 +331,10 @@ This comparison shows how these four interfaces provide different approaches to 
 
 | Feature | nvFuser | CUTE | CuTeDSL | Cutlass |
 |---------|---------|------|----------|---------|
-| **Bias Addition** | [`biasEpilogue()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/tests/cpp/utils.cpp#L624) | Layout operations | Unknown | [`EpilogueFusionParams`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/conv.hpp#L90) |
-| **Activation Functions** | [`LinearOp` with bias](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ops/composite.cpp#L201) | Layout operations | Unknown | [`ActivationFunctor`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L37) |
-| **GELU Activation** | [`biasGeluFwd`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/tests/cpp/test_gpu2.cpp#L1110) | Layout operations | Unknown | [`ScaledGELU_taylor`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/gett.hpp#L647) |
-| **ReLU Activation** | [`ReLU` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ops/composite.cpp#L201) | Layout operations | Unknown | [`Clamp` as ReLU](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/gett.hpp#L647) |
+| **Bias Addition** | [`biasEpilogue()`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/tests/cpp/utils.cpp#L624) | Layout operations | Manual epilogue operations | [`EpilogueFusionParams`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/conv.hpp#L90) |
+| **Activation Functions** | [`LinearOp` with bias](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ops/composite.cpp#L201) | Layout operations | Manual epilogue operations | [`ActivationFunctor`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/epilogue/fusion/operations.hpp#L37) |
+| **GELU Activation** | [`biasGeluFwd`](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/tests/cpp/test_gpu2.cpp#L1110) | Layout operations | Manual epilogue operations | [`ScaledGELU_taylor`](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/gett.hpp#L647) |
+| **ReLU Activation** | [`ReLU` operations](https://github.com/NVIDIA/Fuser/blob/24f20ed739ec7ab054299d4bd7d8abf981169be4/csrc/ops/composite.cpp#L201) | Layout operations | Manual epilogue operations | [`Clamp` as ReLU](https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/include/cutlass/util/reference/host/gett.hpp#L647) |
 
 ### 5.2 Epilogue Visitor Trees (EVT) in Cutlass
 
@@ -784,55 +913,63 @@ class PersistentDenseGemmKernel:
 
 4. **CUTE vs CuTeDSL Distinction**: What is the exact relationship between CUTE (C++ library) and CuTeDSL (Python interface)? Are they the same underlying system with different interfaces, or fundamentally different implementations?
 
+5. **CuTeDSL JIT Compilation**: How does CuTeDSL's JIT compilation system work? What are the compilation overheads and how do they compare to CUTE's compile-time approach?
+
+6. **CuTeDSL Performance**: What are the performance implications of using CuTeDSL's Python interface compared to CUTE's C++ interface? Are there runtime overheads?
+
+7. **CuTeDSL Limitations**: What are the current limitations of CuTeDSL mentioned in the documentation (e.g., 32-bit shapes/strides only, no EVT support, no Windows support)?
+
+8. **CuTeDSL Architecture Support**: How does CuTeDSL handle different GPU architectures (SM75, SM90, SM100)? Are there architecture-specific optimizations?
+
 ### 6.2 Implementation Questions
 
-5. **Mbarrier Implementation Consistency**: Are the mbarrier implementations across all four interfaces (nvFuser, CUTE, CuTeDSL, Cutlass) functionally equivalent, or do they have different semantics?
+9. **Mbarrier Implementation Consistency**: Are the mbarrier implementations across all four interfaces (nvFuser, CUTE, CuTeDSL, Cutlass) functionally equivalent, or do they have different semantics?
 
-6. **Fence Operation Scope**: Do the fence operations (Async Proxy Fence, WgMma Fence) have the same scope and behavior across all interfaces?
+10. **Fence Operation Scope**: Do the fence operations (Async Proxy Fence, WgMma Fence) have the same scope and behavior across all interfaces?
 
-7. **Circular Buffer Synchronization**: How do the circular buffer implementations handle edge cases like buffer overflow, underflow, and synchronization between producer and consumer threads?
+11. **Circular Buffer Synchronization**: How do the circular buffer implementations handle edge cases like buffer overflow, underflow, and synchronization between producer and consumer threads?
 
 ### 6.3 Performance and Optimization Questions
 
-8. **Layout Optimization**: How do the different layout systems (nvFuser's IterDomain, CUTE's Layout, CuTeDSL's layout operations, Cutlass's CUTE integration) compare in terms of compile-time vs runtime optimization?
+12. **Layout Optimization**: How do the different layout systems (nvFuser's IterDomain, CUTE's Layout, CuTeDSL's layout operations, Cutlass's CUTE integration) compare in terms of compile-time vs runtime optimization?
 
-9. **Memory Access Patterns**: Are there differences in how each interface handles memory coalescing, bank conflicts, and shared memory access patterns?
+13. **Memory Access Patterns**: Are there differences in how each interface handles memory coalescing, bank conflicts, and shared memory access patterns?
 
-10. **Hardware Utilization**: How do the different interfaces utilize Tensor Cores, TMA units, and other hardware accelerators? Are there performance differences in similar operations?
+14. **Hardware Utilization**: How do the different interfaces utilize Tensor Cores, TMA units, and other hardware accelerators? Are there performance differences in similar operations?
 
 ### 6.4 Documentation and API Questions
 
-11. **API Completeness**: Are there missing operations in this comparison that are important for real-world applications?
+15. **API Completeness**: Are there missing operations in this comparison that are important for real-world applications?
 
-12. **Version Compatibility**: How do the APIs evolve across different CUDA versions and hardware generations?
+16. **Version Compatibility**: How do the APIs evolve across different CUDA versions and hardware generations?
 
-13. **Error Handling**: How do the different interfaces handle error conditions, invalid operations, and debugging support?
+17. **Error Handling**: How do the different interfaces handle error conditions, invalid operations, and debugging support?
 
 ### 6.5 Integration Questions
 
-14. **Interoperability**: Can these interfaces be used together in the same application, or are they mutually exclusive?
+18. **Interoperability**: Can these interfaces be used together in the same application, or are they mutually exclusive?
 
-15. **Migration Paths**: What are the considerations when migrating between these interfaces for existing codebases?
+19. **Migration Paths**: What are the considerations when migrating between these interfaces for existing codebases?
 
-16. **Best Practices**: What are the recommended use cases for each interface, and when should developers choose one over the others?
+20. **Best Practices**: What are the recommended use cases for each interface, and when should developers choose one over the others?
 
-17. **EVT Integration**: How do Epilogue Visitor Trees integrate with other interfaces beyond Cutlass? Are there equivalent patterns in nvFuser, CUTE, or CuTeDSL?
+21. **EVT Integration**: How do Epilogue Visitor Trees integrate with other interfaces beyond Cutlass? Are there equivalent patterns in nvFuser, CUTE, or CuTeDSL?
 
-18. **EVT Performance**: What are the performance implications of using EVT vs manual epilogue implementation? Are there overhead costs to the visitor pattern?
+22. **EVT Performance**: What are the performance implications of using EVT vs manual epilogue implementation? Are there overhead costs to the visitor pattern?
 
-19. **EVT Complexity**: How complex can EVT compositions become before they impact compile times or code maintainability?
+23. **EVT Complexity**: How complex can EVT compositions become before they impact compile times or code maintainability?
 
-20. **EVT Extensibility**: What are the limitations of the EVT system for custom epilogue operations? When would developers need to fall back to manual implementation?
+24. **EVT Extensibility**: What are the limitations of the EVT system for custom epilogue operations? When would developers need to fall back to manual implementation?
 
-21. **Warp Specialization Overhead**: What is the performance overhead of warp specialization across different interfaces? Are there cases where manual warp coordination outperforms automatic systems?
+25. **Warp Specialization Overhead**: What is the performance overhead of warp specialization across different interfaces? Are there cases where manual warp coordination outperforms automatic systems?
 
-22. **Blackwell Compatibility**: How do the different interfaces handle the transition to Blackwell architecture? Are there specific optimizations or limitations for each interface?
+26. **Blackwell Compatibility**: How do the different interfaces handle the transition to Blackwell architecture? Are there specific optimizations or limitations for each interface?
 
-23. **Multi-Stage Pipeline Limits**: What are the practical limits on the number of circular buffer stages for each interface? When do diminishing returns set in?
+27. **Multi-Stage Pipeline Limits**: What are the practical limits on the number of circular buffer stages for each interface? When do diminishing returns set in?
 
-24. **Memory Bandwidth Saturation**: How do the different interfaces handle memory bandwidth saturation? Are there built-in mechanisms for managing memory pressure?
+28. **Memory Bandwidth Saturation**: How do the different interfaces handle memory bandwidth saturation? Are there built-in mechanisms for managing memory pressure?
 
-25. **Error Recovery**: How do the different interfaces handle errors in circular buffering or warp specialization? Are there built-in error recovery mechanisms?
+29. **Error Recovery**: How do the different interfaces handle errors in circular buffering or warp specialization? Are there built-in error recovery mechanisms?
 
 ---
 
