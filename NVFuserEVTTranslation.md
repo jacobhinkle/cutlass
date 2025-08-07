@@ -583,12 +583,15 @@ TensorView* alpha_acc = mul(alpha, acc);
 TensorView* beta_C = mul(beta, C);
 TensorView* linear_comb = add(alpha_acc, beta_C);
 
-// Generate block scale factors for nvFP4 output
-// Block scale factors are generated per SFVecSize elements
-TensorView* output_fp4 = castOp(DataType::NVFloat4, linear_comb);
-TensorView* output_scale = generateBlockScaleFactor(linear_comb, SFVecSize);
+// Block-wise max reduction and normalization for nvFP4 output
+// 1. Compute per-block maximum (scale factor)
+TensorView* output_scale = maxReduce(linear_comb, {/* block dimensions */});
+// 2. Normalize by dividing by the max
+TensorView* normalized = div(linear_comb, output_scale);
+// 3. Quantize normalized values to nvFP4
+TensorView* output_fp4 = castOp(DataType::NVFloat4, normalized);
 
-// Output both the nvFP4 result and the generated scale factors
+// Output both the nvFP4 tensor and its block scale factors
 fusion->addOutput(output_fp4);
 fusion->addOutput(output_scale);
 ```
@@ -612,12 +615,15 @@ graph TD
         I --> N[add]
         M --> N
         N --> O[linear_comb FP32]
-        O --> P[castOp nvFP4]
-        O --> Q[generateBlockScaleFactor]
+        O --> Q[maxReduce]
+        Q --> R[block_max]
+        O --> S[div]
+        R --> S
+        S --> P[castOp nvFP4]
     end
     
-    P --> R[Output nvFP4]
-    Q --> S[Output Scale Factors]
+    P --> T[Output nvFP4]
+    R --> U[Output Scale Factors]
     
     style A fill:#e1f5fe
     style B fill:#e1f5fe
@@ -626,8 +632,8 @@ graph TD
     style L fill:#e1f5fe
     style G fill:#ffecb3
     style J fill:#ffecb3
-    style R fill:#c8e6c9
-    style S fill:#c8e6c9
+    style T fill:#c8e6c9
+    style U fill:#c8e6c9
     style Epilogue fill:#f3e5f5
 ```
 
@@ -991,7 +997,7 @@ public:
 
 3. **Backward Compatibility**: How should this system handle nvFuser operations that don't have direct EVT equivalents? Should we fall back to traditional nvFuser code generation?
 
-### 9.2 Performance and Optimization
+### 8.2 Performance and Optimization
 
 4. **Performance Overhead**: What is the expected performance overhead of generating EVT code at runtime versus using pre-compiled patterns?
 
@@ -999,7 +1005,7 @@ public:
 
 6. **Kernel Fusion Limits**: What are the practical limits on the complexity of EVT patterns that can be efficiently generated and compiled?
 
-### 9.3 Implementation Details
+### 8.3 Implementation Details
 
 7. **Custom Operation Support**: For nvFuser operations that don't have Cutlass equivalents, what is the preferred approach for generating custom EVT nodes? Should we generate inline CUDA code or use Cutlass's extension mechanisms?
 
