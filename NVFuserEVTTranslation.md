@@ -13,6 +13,7 @@
 4. [EVT Node Translation](#4-evt-node-translation)
    - 4.1 [Operation Mapping Table](#41-operation-mapping-table)
    - 4.2 [Custom Operation Translation](#42-custom-operation-translation)
+     - 4.2.1 [Composable EVT Node Approach](#421-composable-evt-node-approach)
    - 4.3 [Multiple Aux Inputs and Outputs Example](#43-multiple-aux-inputs-and-outputs-example)
 5. [Fusion Operation Mapping](#5-fusion-operation-mapping)
    - 5.1 [nvFuser to EVT Translation Rules](#51-nvfuser-to-evt-translation-rules)
@@ -264,6 +265,124 @@ graph TD
     style B fill:#fff3e0
     style E fill:#fff3e0
 ```
+
+### 4.2.1 Composable EVT Node Approach
+
+A more elegant approach is to build the EVT tree by combining simple, composable nodes rather than writing a monolithic custom compute function. This approach leverages Cutlass's built-in EVT nodes and follows the pattern demonstrated in the Blackwell example.
+
+**Improved nvFuser Pattern:**
+```cpp
+// nvFuser fusion operation with composable EVT nodes
+TensorView* A = TensorViewBuilder().shape({-1, 1, -1}).dtype(DataType::BFloat16);
+TensorView* B = TensorViewBuilder().shape({1, -1, -1}).dtype(DataType::BFloat16);
+fusion->addInput(A);
+fusion->addInput(B);
+TensorView* acc = fusedMultiplySum(A, B, {-1});
+// Epilogue is acc * alpha + beta * C
+Val* alpha = IrBuilder::create<Val>(DataType::Float);
+Val* beta = IrBuilder::create<Val>(DataType::Float);
+fusion->addInput(alpha);
+fusion->addInput(beta);
+// Custom operation: output = alpha * acc + beta * C
+TensorView* alpha_acc = mul(alpha, acc);
+TensorView* beta_C = mul(beta, C);
+TensorView* output = add(alpha_acc, beta_C);
+TensorView* output_bf16 = castOp(DataType::BFloat16, output);
+fusion->addOutput(output_bf16);
+```
+
+**Generated Composable EVT Code:**
+```cpp
+// Composable EVT approach for: output = alpha * acc + beta * C
+// This builds the computation tree using simple, composable nodes
+
+// 1. Build the EVT tree by combining simple nodes
+using ComposableEVT = cutlass::epilogue::fusion::Sm90EVT<
+    // Root: ternary operation (multiply_add) for beta * C + (alpha * acc)
+    cutlass::epilogue::fusion::Sm90Compute<
+        cutlass::homogeneous_multiply_add, ElementD, ElementCompute, RoundStyle>,
+    
+    // First operand: beta (scalar broadcast)
+    cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>,
+    
+    // Second operand: C (source fetch)
+    cutlass::epilogue::fusion::Sm90SrcFetch<ElementC>,
+    
+    // Third operand: nested EVT for alpha * acc
+    cutlass::epilogue::fusion::Sm90EVT<
+        // Binary operation (multiplies) for alpha * acc
+        cutlass::epilogue::fusion::Sm90Compute<
+            cutlass::multiplies, ElementCompute, ElementCompute, RoundStyle>,
+        
+        // First operand: alpha (scalar broadcast)
+        cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>,
+        
+        // Second operand: acc (accumulator fetch)
+        cutlass::epilogue::fusion::Sm90AccFetch
+    >
+>;
+
+// 2. Usage in epilogue arguments with nested structure
+if constexpr (UseCustomEVT) {
+    arguments.epilogue.thread = {
+        // Root ternary op: beta * C + (alpha * acc)
+        {{options.beta}},           // beta scalar
+        {},                         // C tensor (no args needed)
+        {                           // Nested binary op: alpha * acc
+            {{options.alpha}},      // alpha scalar
+            {},                     // acc (no args needed)
+            {}                      // multiplies args
+        },                          // end nested binary op
+        {}                          // multiply_add args
+    };                              // end root ternary op
+}
+```
+
+**Composable EVT Flow:**
+```mermaid
+graph TD
+    A[Matmul Accumulator] --> B[Sm90AccFetch]
+    C[Alpha Scalar] --> D[Sm90ScalarBroadcast]
+    D --> E[Sm90Compute multiplies]
+    B --> E
+    E --> F[alpha * acc]
+    G[Beta Scalar] --> H[Sm90ScalarBroadcast]
+    H --> I[Sm90Compute multiply_add]
+    J[C Tensor] --> K[Sm90SrcFetch]
+    K --> I
+    F --> I
+    I --> L[Output: beta * C + alpha * acc]
+    
+    style A fill:#e1f5fe
+    style C fill:#ffecb3
+    style G fill:#ffecb3
+    style J fill:#e1f5fe
+    style L fill:#c8e6c9
+    style B fill:#fff3e0
+    style D fill:#fff3e0
+    style E fill:#fff3e0
+    style H fill:#fff3e0
+    style I fill:#fff3e0
+    style K fill:#fff3e0
+```
+
+**Advantages of the Composable Approach:**
+
+1. **Modularity**: Each node has a single responsibility (fetch, broadcast, compute)
+2. **Reusability**: Simple nodes can be reused across different EVT patterns
+3. **Maintainability**: Easier to understand and modify individual components
+4. **Performance**: Leverages Cutlass's highly optimized built-in nodes
+5. **Extensibility**: Easy to add new operations by combining existing nodes
+
+**Comparison with Monolithic Approach:**
+
+| Aspect | Monolithic Custom Node | Composable EVT Nodes |
+|--------|----------------------|---------------------|
+| **Complexity** | High - single complex function | Low - simple composable functions |
+| **Reusability** | Low - specific to one pattern | High - nodes can be reused |
+| **Performance** | Depends on implementation | Leverages optimized built-ins |
+| **Maintainability** | Difficult to modify | Easy to modify individual nodes |
+| **Debugging** | Hard to isolate issues | Easy to test individual nodes |
 
 ### 4.3 Multiple Aux Inputs and Outputs Example
 

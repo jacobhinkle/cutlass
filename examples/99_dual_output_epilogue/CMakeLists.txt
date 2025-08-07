@@ -26,16 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Test options for different problem sizes
-set(TEST_SMALL --m=512 --n=512 --k=512)
-set(TEST_MEDIUM --m=1024 --n=1024 --k=1024)
-set(TEST_LARGE --m=2048 --n=2048 --k=2048)
-
 cutlass_example_add_executable(
   99_dual_output_epilogue
   dual_output_epilogue_example.cu
-  TEST_COMMAND_OPTIONS
-  TEST_SMALL
-  TEST_MEDIUM
-  TEST_LARGE
 ) 

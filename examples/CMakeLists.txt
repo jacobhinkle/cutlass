@@ -164,6 +164,7 @@ foreach(EXAMPLE
   83_blackwell_sparse_gemm
   84_blackwell_narrow_precision_sparse_gemm
   88_hopper_fmha
+  99_dual_output_epilogue
   )
 
   add_subdirectory(${EXAMPLE})
