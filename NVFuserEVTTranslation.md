@@ -366,6 +366,8 @@ graph TD
     style K fill:#fff3e0
 ```
 
+**Note:** The fusion flow diagram above shows the logical separation of operations, but the actual EVT implementation uses `cutlass::homogeneous_multiply_add` which combines the beta multiplication and addition into a single optimized operation. This is more efficient than performing separate multiply and add operations, as it reduces the number of memory accesses and computational steps.
+
 **Advantages of the Composable Approach:**
 
 1. **Modularity**: Each node has a single responsibility (fetch, broadcast, compute)
